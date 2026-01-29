@@ -1,0 +1,30 @@
+# python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# git
+.git/
+.gitignore
+
+# node (있다면)
+node_modules/
+.next/
+dist/
+build/
+
+# logs & data
+*.log
+logs/
+data/
+tmp/
+*.sqlite3
+
+# mac/windows
+.DS_Store
+Thumbs.db

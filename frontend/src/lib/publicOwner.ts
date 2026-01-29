@@ -1,0 +1,1 @@
+export const PUBLIC_OWNER_ID = 1;

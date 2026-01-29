@@ -1,0 +1,81 @@
+# -------------------------
+# OS / Editor
+# -------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# -------------------------
+# Logs
+# -------------------------
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-debug.log*
+
+# -------------------------
+# Secrets / Env
+# -------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+# -------------------------
+# Node / Next.js (frontend)
+# -------------------------
+**/node_modules/
+**/.next/
+**/out/
+**/build/
+**/dist/
+**/.turbo/
+**/.cache/
+**/.parcel-cache/
+**/.vercel/
+**/*.tsbuildinfo
+**/next-env.d.ts
+
+# -------------------------
+# Python (app/, consumer/, relay/, scripts/)
+# -------------------------
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.coverage
+**/coverage.xml
+**/htmlcov/
+
+# venvs
+**/.venv/
+**/venv/
+**/ENV/
+**/env/
+
+# build artifacts
+**/*.egg-info/
+**/build/
+**/dist/
+
+# -------------------------
+# Data / local runtime files
+# -------------------------
+**/*.sqlite3
+**/*.db
+**/data/
+**/tmp/
+**/storage/
+
+# -------------------------
+# Docker runtime (optional)
+# -------------------------
+**/docker-data/

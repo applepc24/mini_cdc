@@ -1,0 +1,108 @@
+.login-theme {
+  --background: 250 20% 96%;
+  --foreground: 250 30% 15%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 250 30% 15%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 250 30% 15%;
+
+  --primary: 258 70% 55%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 250 30% 96%;
+  --secondary-foreground: 250 30% 25%;
+
+  --muted: 250 20% 94%;
+  --muted-foreground: 250 15% 50%;
+
+  --accent: 258 80% 60%;
+  --accent-foreground: 0 0% 100%;
+
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 250 20% 90%;
+  --input: 250 20% 92%;
+  --ring: 258 70% 55%;
+
+  --radius: 0.75rem;
+
+  --gradient-start: 258 75% 50%;
+  --gradient-end: 250 85% 65%;
+  --auth-hero-text: 0 0% 98%;
+  --social-bg: 250 40% 97%;
+  --social-hover: 258 70% 55%;
+}
+
+.login-theme.dark {
+  --background: 250 30% 8%;
+  --foreground: 0 0% 95%;
+
+  --card: 250 25% 12%;
+  --card-foreground: 0 0% 95%;
+
+  --popover: 250 25% 12%;
+  --popover-foreground: 0 0% 95%;
+
+  --primary: 258 70% 60%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 250 20% 18%;
+  --secondary-foreground: 0 0% 90%;
+
+  --muted: 250 20% 16%;
+  --muted-foreground: 250 15% 60%;
+
+  --accent: 258 80% 65%;
+  --accent-foreground: 0 0% 100%;
+
+  --destructive: 0 62.8% 45%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 250 20% 20%;
+  --input: 250 20% 18%;
+  --ring: 258 70% 60%;
+
+  --gradient-start: 258 75% 45%;
+  --gradient-end: 250 85% 55%;
+  --auth-hero-text: 0 0% 98%;
+  --social-bg: 250 30% 20%;
+  --social-hover: 258 70% 60%;
+}
+
+/* 유틸리티들 (로그인 페이지에서만 쓰임) */
+.login-theme .auth-gradient {
+  background: linear-gradient(
+    135deg,
+    hsl(var(--gradient-start)) 0%,
+    hsl(var(--gradient-end)) 100%
+  );
+}
+
+.login-theme .auth-card-shadow {
+  box-shadow:
+    0 25px 50px -12px hsl(var(--gradient-start) / 0.15),
+    0 12px 24px -8px hsl(var(--gradient-start) / 0.1);
+}
+
+.login-theme .input-focus-ring {
+  /* Tailwind @apply는 globals에서만 쓰는 게 안전해서, 순수 CSS로 */
+  transition: all 200ms;
+}
+.login-theme .input-focus-ring:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.3);
+  border-color: hsl(var(--primary));
+}
+
+.login-theme .text-auth-hero {
+  color: hsl(var(--auth-hero-text));
+}
+.login-theme .bg-auth-social {
+  background-color: hsl(var(--social-bg));
+}
+.login-theme .bg-auth-social-hover {
+  background-color: hsl(var(--social-hover));
+}
