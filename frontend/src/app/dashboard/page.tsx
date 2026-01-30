@@ -28,19 +28,18 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { CardSkeleton, ChartSkeleton } from "@/components/ui/skeleton-loader";
-import { apiGet } from "@/lib/api";
+import { apiGet, getAccessToken } from "@/lib/api";
 import { getStockStatus } from "@/lib/utils/stock";
 import { useSettings } from "@/hooks/use-settings";
 import type { Product } from "@/lib/types";
 import { PUBLIC_OWNER_ID } from "@/lib/publicOwner";
+import { mockProducts } from "@/lib/mock/products";
 
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: {
-      staggerChildren: 0.1,
-    },
+    transition: { staggerChildren: 0.1 },
   },
 };
 
@@ -61,26 +60,72 @@ type SearchListResponse<T> = {
   items: T[];
 };
 
+function computeDashboardFromProducts(products: Product[], threshold: number) {
+  const totalProducts = products.length;
+  const lowStockCount = products.filter((p) => p.qty <= threshold).length;
+  const totalQty = products.reduce((acc, p) => acc + (Number(p.qty) || 0), 0);
+
+  const categoryMap = new Map<string, number>();
+  for (const p of products) {
+    const key = p.category ?? "기타";
+    categoryMap.set(key, (categoryMap.get(key) ?? 0) + 1);
+  }
+  const topCategories = Array.from(categoryMap.entries())
+    .map(([category, count]) => ({ category, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
+
+  return { totalProducts, lowStockCount, totalQty, topCategories };
+}
+
+function sortByUpdatedDesc(products: Product[]) {
+  return [...products].sort(
+    (a, b) =>
+      new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+  );
+}
+
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [recentProducts, setRecentProducts] = useState<Product[]>([]);
   const [lowStockTop5, setLowStockTop5] = useState<Product[]>([]);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [isMockMode, setIsMockMode] = useState(false);
 
   const { settings } = useSettings();
 
   useEffect(() => {
     const fetchAll = async () => {
-      // ✅ 한 번만 읽기
-      const token =
-        typeof window !== "undefined"
-          ? localStorage.getItem("accessToken")
-          : null;
-
+      const token = getAccessToken();
       const ownerId = PUBLIC_OWNER_ID;
 
+      // ✅ 로그인 안 했으면 mock 모드
+      if (!token) {
+        setIsMockMode(true);
+        setLoading(true);
+
+        const all = sortByUpdatedDesc(mockProducts);
+        const dash = computeDashboardFromProducts(all, settings.threshold);
+
+        const recent = all.slice(0, 10);
+        const low = all
+          .filter((p) => p.qty <= settings.threshold)
+          .sort((a, b) => a.qty - b.qty)
+          .slice(0, 5);
+
+        setDashboard(dash);
+        setRecentProducts(recent);
+        setLowStockTop5(low);
+        setAllProducts(all);
+
+        setLoading(false);
+        return;
+      }
+
+      // ✅ 로그인 했으면 서버 데이터
       try {
+        setIsMockMode(false);
         setLoading(true);
 
         const dash = await apiGet<DashboardResponse>(
@@ -102,13 +147,31 @@ export default function DashboardPage() {
           `/products?owner_id=${ownerId}&limit=200&offset=0`,
         );
         setAllProducts(all.items);
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error(e);
 
-        // ✅ 로그인된 상태(token 존재)에서만 401이면 로그인으로
-        if (token && String(e?.message ?? "").includes("API Error 401")) {
+        const msg = e instanceof Error ? e.message : String(e);
+
+        // ✅ 로그인된 상태에서만 401이면 로그인으로
+        if (token && msg.includes("API Error 401")) {
           window.location.href = "/login";
+          return;
         }
+
+        // ✅ 서버 실패하면 mock으로라도 보여주기 (UX)
+        setIsMockMode(true);
+        const all = sortByUpdatedDesc(mockProducts);
+        const dash = computeDashboardFromProducts(all, settings.threshold);
+
+        setDashboard(dash);
+        setRecentProducts(all.slice(0, 10));
+        setLowStockTop5(
+          all
+            .filter((p) => p.qty <= settings.threshold)
+            .sort((a, b) => a.qty - b.qty)
+            .slice(0, 5),
+        );
+        setAllProducts(all);
       } finally {
         setLoading(false);
       }
@@ -160,7 +223,6 @@ export default function DashboardPage() {
 
   const categoryData = useMemo(() => {
     if (!dashboard) return [];
-
     return dashboard.topCategories
       .map((c) => ({ name: c.category, value: c.count }))
       .slice(0, 8);
@@ -221,9 +283,17 @@ export default function DashboardPage() {
         animate="visible"
         className="space-y-6"
       >
+        {/* (선택) mock 모드 배너 */}
+        {isMockMode && (
+          <div className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+            현재 <b>체험 모드</b>로 표시 중입니다. (로그인하면 실제 데이터가
+            보여요)
+          </div>
+        )}
+
         {/* KPI Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {kpis.map((kpi, index) => (
+          {kpis.map((kpi) => (
             <motion.div
               key={kpi.label}
               variants={itemVariants}

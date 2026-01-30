@@ -95,6 +95,7 @@ def restock_agent(
     threshold: int = Query(14, ge=0),
     limit: int = Query(200, ge=1, le=500),
     dry_run: bool = Query(True),
+    explain_llm: bool = Query(False),
     idempotency_key: str | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -176,6 +177,8 @@ def restock_agent(
             owner_id=current_user.id,
             threshold=threshold,
             limit=limit,
+            explain_llm=explain_llm,
+            
         )
         tool_calls.append(
             AgentToolCall(name="restock.recommend", status="ok", dryRun=None)
@@ -256,6 +259,7 @@ def restock_agent(
             toolCalls=tool_calls,
             trace=trace,
             idempotency=idem_info,  # ✅ 항상 포함
+            llm=meta.get("llm"),
         )
 
         # ✅ DONE 저장 + commit (execute일 때만)

@@ -1,9 +1,7 @@
 "use client";
 
-import React from "react";
-
-import { useState, useRef, useEffect } from "react";
-import { clearAccessToken, getAccessToken } from "@/lib/api";
+import React, { useState, useRef, useEffect } from "react";
+import { clearAccessToken, getAccessToken, apiGet } from "@/lib/api";
 import { useRouter, usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -17,12 +15,11 @@ import {
   Command,
 } from "lucide-react";
 import { useTheme } from "@/hooks/use-theme";
-import { apiGet } from "@/lib/api";
 
 type NotificationItem = {
   id: number;
   eventType: string;
-  payload: any;
+  payload: unknown; // ✅ any -> unknown
   createdAt: string;
 };
 
@@ -38,18 +35,61 @@ const pageTitles: Record<string, string> = {
   "/settings": "설정",
 };
 
+// ✅ unknown 안전 처리용 유틸
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
+function getStr(obj: Record<string, unknown>, key: string): string | undefined {
+  const v = obj[key];
+  return typeof v === "string" ? v : undefined;
+}
+
+function getNum(obj: Record<string, unknown>, key: string): number | undefined {
+  const v = obj[key];
+  return typeof v === "number" ? v : undefined;
+}
+
+function getOneOfStr(
+  obj: Record<string, unknown>,
+  keys: string[],
+): string | undefined {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string") return v;
+    if (typeof v === "number") return String(v); // id 같은 경우 숫자도 허용
+  }
+  return undefined;
+}
+
+const fmtPrice = (v: unknown) =>
+  typeof v === "number" ? `₩${v.toLocaleString()}` : "₩-";
+
+const fmtQty = (v: unknown) =>
+  typeof v === "number" ? `${v.toLocaleString()}개` : "-개";
+
 export function Topbar({ onOpenCommandPalette, searchInputRef }: TopbarProps) {
   const router = useRouter();
   const pathname = usePathname();
+
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [searchValue, setSearchValue] = useState("");
+
   const userMenuRef = useRef<HTMLDivElement>(null);
   const notificationRef = useRef<HTMLDivElement>(null);
+
   const { resolvedTheme, setTheme } = useTheme();
+
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [hasNew, setHasNew] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+
+  // ✅ effect에서 setState로 토큰 세팅 금지 → lazy init
+  const [token, setToken] = useState<string | null>(() => getAccessToken());
+  const isAuthed = !!token;
+
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   const pageTitle = pathname.startsWith("/products/")
     ? "제품 상세"
@@ -62,18 +102,30 @@ export function Topbar({ onOpenCommandPalette, searchInputRef }: TopbarProps) {
     return () => clearInterval(id);
   }, []);
 
+  // ✅ token이 있을 때만 "비동기 결과"로 setState
   useEffect(() => {
-    // ✅ 토큰 없으면 알림(REST + SSE) 자체를 안 건다
-    const token =
-      typeof window !== "undefined"
-        ? localStorage.getItem("accessToken")
-        : null;
+    if (!token) return;
 
-    if (!token) {
-      return;
-    }
+    let cancelled = false;
 
-    // 1) 처음엔 REST로 최신 10개 가져오기 (초기 화면용)
+    (async () => {
+      try {
+        const me = await apiGet<{ email: string }>("/auth/me");
+        if (!cancelled) setUserEmail(me.email);
+      } catch {
+        // noop
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  // ✅ 알림 SSE: token 있을 때만 구독
+  useEffect(() => {
+    if (!token) return;
+
     const fetchInitial = async () => {
       try {
         const res = await apiGet<{ items: NotificationItem[] }>(
@@ -91,7 +143,6 @@ export function Topbar({ onOpenCommandPalette, searchInputRef }: TopbarProps) {
 
     fetchInitial();
 
-    // 2) 이후부터는 SSE로 새 알림만 받기 (✅ 토큰을 query로 붙여서 인증)
     const base =
       process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -103,7 +154,7 @@ export function Topbar({ onOpenCommandPalette, searchInputRef }: TopbarProps) {
     const es = new EventSource(url);
 
     es.addEventListener("notification", (e: MessageEvent) => {
-      const item: NotificationItem = JSON.parse(e.data);
+      const item: NotificationItem = JSON.parse(e.data) as NotificationItem;
 
       setNotifications((prev) => {
         if (prev.some((x) => x.id === item.id)) return prev;
@@ -120,7 +171,7 @@ export function Topbar({ onOpenCommandPalette, searchInputRef }: TopbarProps) {
     return () => {
       es.close();
     };
-  }, []);
+  }, [token]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -128,6 +179,7 @@ export function Topbar({ onOpenCommandPalette, searchInputRef }: TopbarProps) {
       router.push(`/products?q=${encodeURIComponent(searchValue.trim())}`);
     }
   };
+
   const formatRelativeTime = (iso: string) => {
     const diffMs = now - new Date(iso).getTime();
     const diffSec = Math.floor(diffMs / 1000);
@@ -142,29 +194,27 @@ export function Topbar({ onOpenCommandPalette, searchInputRef }: TopbarProps) {
   };
 
   const toMessage = (n: NotificationItem) => {
-    const p = n.payload ?? {};
+    const p = isRecord(n.payload) ? n.payload : {};
 
-    const name = p.name ?? "제품";
-    const category = p.category ? `(${p.category})` : "";
-    const productId = p.productId ?? p.product_id ?? null;
+    const name = getStr(p, "name") ?? "제품";
+    const categoryStr = getStr(p, "category");
+    const category = categoryStr ? `(${categoryStr})` : "";
 
-    const fmtPrice = (v: any) =>
-      typeof v === "number" ? `₩${v.toLocaleString()}` : "₩-";
-
-    const fmtQty = (v: any) =>
-      typeof v === "number" ? `${v.toLocaleString()}개` : "-개";
+    const productId =
+      getOneOfStr(p, ["productId", "product_id"]) ?? undefined;
 
     switch (n.eventType) {
       case "PRODUCT_CREATED":
         return `새 제품 추가됨: ${name} ${category} · 재고 ${fmtQty(
-          p.qty,
-        )} · ${fmtPrice(p.price)}${productId ? ` · #${productId}` : ""}`;
-
-      case "PRODUCT_UPDATED":
-        // ✅ “정보 수정” 전용 (qty는 여기서 안 바뀌는 게 맞음)
-        return `제품 정보 수정됨: ${name} ${category} · ${fmtPrice(p.price)}${
+          getNum(p, "qty"),
+        )} · ${fmtPrice(getNum(p, "price"))}${
           productId ? ` · #${productId}` : ""
         }`;
+
+      case "PRODUCT_UPDATED":
+        return `제품 정보 수정됨: ${name} ${category} · ${fmtPrice(
+          getNum(p, "price"),
+        )}${productId ? ` · #${productId}` : ""}`;
 
       case "PRODUCT_DELETED":
         return `제품 삭제됨: ${name} ${category}${
@@ -172,17 +222,18 @@ export function Topbar({ onOpenCommandPalette, searchInputRef }: TopbarProps) {
         }`;
 
       case "STOCK_ADJUSTED": {
-        const delta = typeof p.delta === "number" ? p.delta : 0;
+        const delta = getNum(p, "delta") ?? 0;
         const sign = delta > 0 ? "+" : "";
-        const before = p.beforeQty;
-        const after = p.afterQty;
 
+        const before = getNum(p, "beforeQty");
+        const after = getNum(p, "afterQty");
+
+        const type = getStr(p, "type"); // "in" | "out" | ...
         const actionText =
-          p.type === "in" ? "입고" : p.type === "out" ? "출고" : "조정";
-        const qtyText =
-          typeof p.quantity === "number"
-            ? `${p.quantity.toLocaleString()}개`
-            : "";
+          type === "in" ? "입고" : type === "out" ? "출고" : "조정";
+
+        const quantity = getNum(p, "quantity");
+        const qtyText = typeof quantity === "number" ? `${quantity.toLocaleString()}개` : "";
 
         const rangeText =
           typeof before === "number" && typeof after === "number"
@@ -226,7 +277,6 @@ export function Topbar({ onOpenCommandPalette, searchInputRef }: TopbarProps) {
 
       {/* Right Actions */}
       <div className="flex items-center gap-2">
-        {/* Command Palette Trigger */}
         <button
           onClick={onOpenCommandPalette}
           className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-lg border border-input transition-colors"
@@ -258,6 +308,7 @@ export function Topbar({ onOpenCommandPalette, searchInputRef }: TopbarProps) {
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-emerald-500 rounded-full" />
             )}
           </button>
+
           <AnimatePresence>
             {showNotifications && (
               <motion.div
@@ -308,6 +359,7 @@ export function Topbar({ onOpenCommandPalette, searchInputRef }: TopbarProps) {
               <User className="w-4 h-4 text-emerald-500" />
             </div>
           </button>
+
           <AnimatePresence>
             {showUserMenu && (
               <motion.div
@@ -321,15 +373,29 @@ export function Topbar({ onOpenCommandPalette, searchInputRef }: TopbarProps) {
                   type="button"
                   onClick={() => {
                     setShowUserMenu(false);
-                    router.push("/login");
+                    if (!isAuthed) router.push("/login");
                   }}
                   className="w-full text-left px-4 py-3 border-b border-border hover:bg-muted/50 transition-colors"
                 >
-                  <p className="font-medium text-foreground">관리자</p>
-                  <p className="text-sm text-muted-foreground">
-                    admin@stockpulse.app
-                  </p>
+                  {isAuthed ? (
+                    <>
+                      <p className="font-medium text-foreground">로그인됨</p>
+                      <p className="text-sm text-muted-foreground">
+                        {userEmail ?? "사용자"}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-medium text-foreground">
+                        로그인이 필요합니다
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        계정으로 접속하세요
+                      </p>
+                    </>
+                  )}
                 </button>
+
                 <div className="p-2">
                   <button
                     onClick={() => {
@@ -347,6 +413,7 @@ export function Topbar({ onOpenCommandPalette, searchInputRef }: TopbarProps) {
                       {resolvedTheme === "dark" ? "라이트 모드" : "다크 모드"}
                     </span>
                   </button>
+
                   <button
                     onClick={() => {
                       router.push("/settings");
@@ -357,21 +424,37 @@ export function Topbar({ onOpenCommandPalette, searchInputRef }: TopbarProps) {
                     <Settings className="w-4 h-4" />
                     <span className="text-sm">설정</span>
                   </button>
-                  <div className="my-1 border-t border-border" />
-                  <button
-                    onClick={() => {
-                      clearAccessToken();
-                      setNotifications([]);
-                      setHasNew(false);
-                      setShowUserMenu(false);
 
-                      window.location.href = "/dashboard";
-                    }}
-                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-red-500 hover:bg-red-500/10 transition-colors"
-                  >
-                    <LogOut className="w-4 h-4" />
-                    <span className="text-sm">로그아웃</span>
-                  </button>
+                  <div className="my-1 border-t border-border" />
+
+                  {isAuthed ? (
+                    <button
+                      onClick={() => {
+                        clearAccessToken();
+                        setNotifications([]);
+                        setHasNew(false);
+                        setUserEmail(null);
+                        setToken(null);
+                        setShowUserMenu(false);
+                        window.location.href = "/dashboard";
+                      }}
+                      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-red-500 hover:bg-red-500/10 transition-colors"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      <span className="text-sm">로그아웃</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setShowUserMenu(false);
+                        router.push("/login");
+                      }}
+                      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-emerald-600 hover:bg-emerald-500/10 transition-colors"
+                    >
+                      <User className="w-4 h-4" />
+                      <span className="text-sm">로그인</span>
+                    </button>
+                  )}
                 </div>
               </motion.div>
             )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { AlertTriangle, Download, Sparkles, Settings } from "lucide-react";
@@ -19,6 +19,7 @@ import { getStockStatus } from "@/lib/utils/stock";
 import { useSettings } from "@/hooks/use-settings";
 import { useAppToast } from "@/hooks/use-app-toast";
 import type { Product } from "@/lib/types";
+import { mockProducts } from "@/lib/mock/products";
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -33,8 +34,20 @@ const itemVariants = {
   visible: { opacity: 1, y: 0 },
 };
 
+function getAccessToken() {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("accessToken");
+}
+
 export default function AlertsPage() {
   type Reason = "product_sales" | "category_sales" | "threshold_fallback";
+
+  type RestockExplanation = {
+    overview: string;
+    top3: string[];
+    notes: string[];
+    perItem: Record<number, string>;
+  };
 
   type RestockRecommendation = {
     productId: number;
@@ -70,6 +83,7 @@ export default function AlertsPage() {
       status: "NONE" | "STARTED" | "DONE" | "FAILED" | "REUSED";
       reused: boolean;
     };
+    llm?: RestockExplanation | null;
   };
 
   const { settings, updateSettings } = useSettings();
@@ -80,6 +94,7 @@ export default function AlertsPage() {
   const [localThreshold, setLocalThreshold] = useState(settings.threshold);
   const [agent, setAgent] = useState<AgentResponse | null>(null);
   const [agentLoading, setAgentLoading] = useState(false);
+  const [explainLLM, setExplainLLM] = useState(false);
 
   const reasonLabel: Record<string, string> = {
     product_sales: "상품 판매 기반",
@@ -100,32 +115,66 @@ export default function AlertsPage() {
 
   const fetchLowStock = async (threshold: number) => {
     setLoading(true);
+
+    const token = getAccessToken();
+    if (!token) {
+      // ✅ mock 모드: threshold 기준으로 필터 + 보기좋게 정렬
+      const items = mockProducts
+        .filter((p) => p.qty <= threshold)
+        .sort((a, b) => {
+          // qty 오름차순, updated_at 내림차순
+          if (a.qty !== b.qty) return a.qty - b.qty;
+          return (
+            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+          );
+        });
+
+      setProducts(items);
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await apiGet<{ count: number; items: Product[] }>(
         `/alerts/low-stock?owner_id=1&threshold=${threshold}&limit=200`,
       );
       setProducts(res.items);
-    } catch (e) {
+    } catch (e: unknown) {
       console.error(e);
+
+      // ✅ 로그인 상태인데 401이면 로그인으로
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("API Error 401")) {
+        window.location.href = "/login";
+        return;
+      }
+
       addToast("error", "재고 부족 목록 조회 실패");
       setProducts([]);
     } finally {
       setLoading(false);
     }
   };
+
   const callAgentRecommend = async () => {
+    const token = getAccessToken();
+    if (!token) {
+      addToast("error", "로그인 후 자동 재입고 추천을 사용할 수 있습니다");
+      return;
+    }
+
     setAgentLoading(true);
     try {
       const res = await apiPost<AgentResponse>(
-        `/ai/restock/agent?dry_run=true&threshold=${localThreshold}&limit=200`,
+        `/ai/restock/agent?dry_run=true&threshold=${localThreshold}&limit=200&explain_llm=${explainLLM}`,
         {},
       );
       setAgent(res);
       addToast("success", `추천 ${res.summary.needCount}건 생성됨`);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      const msg = String(e?.message || "");
-      if (msg.includes("AUTH_REQUIRED")) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("AUTH_REQUIRED") || msg.includes("API Error 401")) {
         addToast("error", "로그인이 필요합니다");
         return;
       }
@@ -141,6 +190,7 @@ export default function AlertsPage() {
 
   useEffect(() => {
     fetchLowStock(settings.threshold);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.threshold]);
 
   const lowStockProducts = products;
@@ -156,20 +206,13 @@ export default function AlertsPage() {
   };
 
   const handleDownloadCSV = () => {
-    const headers = [
-      "Product ID",
-      "Name",
-      "Category",
-      "Stock",
-      "Price",
-      "Status",
-    ];
+    const headers = ["Product ID", "Name", "Category", "Stock", "Price", "Status"];
     const rows = lowStockProducts.map((p) => [
-      p.product_id,
+      String(p.product_id),
       p.name,
       p.category,
-      p.qty.toString(),
-      p.price.toFixed(2),
+      String(p.qty),
+      String(p.price),
       getStockStatus(p.qty, localThreshold),
     ]);
 
@@ -178,9 +221,7 @@ export default function AlertsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `low-stock-report-${
-      new Date().toISOString().split("T")[0]
-    }.csv`;
+    a.download = `low-stock-report-${new Date().toISOString().split("T")[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
 
@@ -286,9 +327,7 @@ export default function AlertsPage() {
                   min="1"
                   max="100"
                   value={localThreshold}
-                  onChange={(e) =>
-                    handleThresholdChange(Number(e.target.value))
-                  }
+                  onChange={(e) => handleThresholdChange(Number(e.target.value))}
                   className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
                 />
                 <Input
@@ -297,9 +336,7 @@ export default function AlertsPage() {
                   min="1"
                   max="100"
                   value={localThreshold}
-                  onChange={(e) =>
-                    handleThresholdChange(Number(e.target.value))
-                  }
+                  onChange={(e) => handleThresholdChange(Number(e.target.value))}
                   className="w-20"
                 />
               </div>
@@ -336,6 +373,8 @@ export default function AlertsPage() {
             {agentLoading ? "추천 생성 중..." : "자동 재입고 추천 보기"}
           </Button>
         </motion.div>
+
+        {/* Agent 결과(로그인했을 때만 보통 뜸) */}
         {agent && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -359,9 +398,49 @@ export default function AlertsPage() {
                   </span>
                 </p>
               </div>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-sm text-muted-foreground select-none">
+                  <input
+                    type="checkbox"
+                    checked={explainLLM}
+                    onChange={(e) => setExplainLLM(e.target.checked)}
+                  />
+                  LLM 설명
+                </label>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={callAgentRecommend}
+                  disabled={agentLoading}
+                >
+                  {agentLoading ? "생성 중..." : "다시 생성"}
+                </Button>
+              </div>
             </div>
 
-            {/* Summary chips */}
+            {agent.llm && (
+              <div className="mt-4 rounded-lg border border-border bg-muted/30 p-4">
+                <p className="text-sm font-medium text-foreground">LLM 요약</p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {agent.llm.overview}
+                </p>
+                {agent.llm.top3?.length > 0 && (
+                  <div className="mt-3 text-sm text-muted-foreground">
+                    <span className="font-medium text-foreground">Top 3</span>:{" "}
+                    {agent.llm.top3.join(" · ")}
+                  </div>
+                )}
+                {agent.llm.notes?.length > 0 && (
+                  <ul className="mt-3 space-y-1 text-sm text-muted-foreground list-disc pl-5">
+                    {agent.llm.notes.slice(0, 3).map((n, i) => (
+                      <li key={i}>{n}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
             <div className="mt-4 flex flex-wrap gap-2">
               {reasonOrder
                 .filter((r) => (agent.summary.byReason?.[r] ?? 0) > 0)
@@ -374,17 +453,6 @@ export default function AlertsPage() {
                   </span>
                 ))}
             </div>
-
-            {/* Top needs */}
-            {agent.summary.topNeeds?.length > 0 && (
-              <div className="mt-3 text-sm text-muted-foreground">
-                <span className="font-medium text-foreground">Top 3</span>:{" "}
-                {agent.summary.topNeeds
-                  .slice(0, 3)
-                  .map((t) => `${t.name} +${t.recommendIn}`)
-                  .join(" · ")}
-              </div>
-            )}
 
             {agent.summary.needCount === 0 ? (
               <p className="text-sm text-muted-foreground mt-4">
@@ -418,7 +486,6 @@ export default function AlertsPage() {
                       </th>
                     </tr>
                   </thead>
-
                   <tbody className="divide-y divide-border">
                     {agent.items
                       .filter((x) => x.recommendIn > 0)
@@ -505,7 +572,7 @@ export default function AlertsPage() {
                 <tbody className="divide-y divide-border">
                   {lowStockProducts.map((product, index) => (
                     <motion.tr
-                      key={product.product_id}
+                      key={String(product.product_id)}
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ delay: index * 0.03 }}
@@ -536,8 +603,8 @@ export default function AlertsPage() {
                             product.qty === 0
                               ? "text-red-500"
                               : product.qty < 5
-                                ? "text-orange-500"
-                                : "text-yellow-500"
+                              ? "text-orange-500"
+                              : "text-yellow-500"
                           }`}
                         >
                           {product.qty}

@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 from typing import Literal, Optional, List, Dict
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from app.ai.restock.schemas import Reason
-from app.ai.restock.schemas import RestockRecommendation
+from app.ai.restock.schemas import Reason, RestockRecommendation, RestockExplanation
+
+IdemStatus = Literal["NONE", "STARTED", "DONE", "FAILED", "REUSED"]
+
+class AgentIdempotency(BaseModel):
+    key: Optional[str] = None
+    status: IdemStatus = "NONE"
+    reused: bool = False
 
 
 class AgentTopNeed(BaseModel):
@@ -37,7 +43,7 @@ class AgentToolCall(BaseModel):
 class AgentTrace(BaseModel):
     name: str
     ts: str
-    data: dict = {}
+    data: dict = Field(default_factory=dict)
 
 
 class AgentPlanItem(BaseModel):
@@ -50,16 +56,9 @@ class AgentResponse(BaseModel):
     ok: bool = True
     decision: AgentDecision
     summary: AgentSummary
-    items: List[RestockRecommendation] = []
-    plan: List[AgentPlanItem]
-    toolCalls: List[AgentToolCall]
-    trace: List[AgentTrace]
+    items: List[RestockRecommendation] = Field(default_factory=list)
+    plan: List[AgentPlanItem] = Field(default_factory=list)
+    toolCalls: List[AgentToolCall] = Field(default_factory=list)
+    trace: List[AgentTrace] = Field(default_factory=list)
     idempotency: AgentIdempotency
-
-
-IdemStatus = Literal["NONE","STARTED", "DONE", "FAILED", "REUSED"]
-
-class AgentIdempotency(BaseModel):
-    key: Optional[str] = None
-    status: IdemStatus = "NONE"
-    reused: bool = False
+    llm: Optional[RestockExplanation] = None

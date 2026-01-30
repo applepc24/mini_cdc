@@ -1,19 +1,20 @@
 import asyncio
 import json
-from datetime import datetime
-from typing import Literal, Optional
+
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import text 
 
 from app.auth.deps import get_current_user
 from app.db import SessionLocal, get_db
 from app.models import OutboxEvent, ProductSearch, User
 from app.schemas import SearchListResponse
 from app.services.dashboard_service import get_dashboard_stats
-from app.services.embedding_service import make_product_embedding
+# from app.services.embedding_service import make_product_embedding
 from app.services.notification_service import list_notifications, to_iso_z
 from app.services.search_service import search_products
 from app.services.vector_search_service import hybrid_search_products
@@ -226,3 +227,22 @@ async def stream_notifications(
             "X-Accel-Buffering": "no",  # nginx 있으면 버퍼링 방지
         },
     )
+
+@router.get("/categories")
+def get_categories(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = db.execute(
+        text("""
+            SELECT DISTINCT category
+            FROM product_search
+            WHERE owner_id = :owner_id
+              AND category IS NOT NULL
+              AND category <> ''
+            ORDER BY category ASC
+        """),
+        {"owner_id": current_user.id},
+    ).all()
+
+    return {"items": [r[0] for r in rows]}

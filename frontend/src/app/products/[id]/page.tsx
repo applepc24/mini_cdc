@@ -25,13 +25,15 @@ import { CardSkeleton } from "@/components/ui/skeleton-loader";
 import { ProductFormModal } from "@/components/products/product-form-modal";
 import { StockAdjustModal } from "@/components/products/stock-adjust-modal";
 
-import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
+import { apiGet, apiPut, apiDelete, getAccessToken } from "@/lib/api";
 import { getStockStatus } from "@/lib/utils/stock";
 
 import { useSettings } from "@/hooks/use-settings";
 import { useAppToast } from "@/hooks/use-app-toast";
 
 import type { Product, StockHistory, ProductInput } from "@/lib/types";
+import { mockProducts } from "@/lib/mock/products";
+import { PUBLIC_OWNER_ID } from "@/lib/publicOwner";
 
 export default function ProductDetailPage() {
   const router = useRouter();
@@ -49,17 +51,52 @@ export default function ProductDetailPage() {
   const [showStockModal, setShowStockModal] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
-  const productId = Number(params.id);
+
+  function getParamString(
+    params: ReturnType<typeof useParams>,
+    key: string,
+  ): string {
+    const v = params[key];
+    if (typeof v === "string") return v;
+    if (Array.isArray(v)) return v[0] ?? "";
+    return "";
+  }
+  // ✅ params.id는 "PRD-0001" 같은 문자열일 수도 있고, "123" 같은 숫자 문자열일 수도 있음
+  const rawId = getParamString(params, "id");
+
+  const token = getAccessToken();
+  const isMockMode = !token;
 
   useEffect(() => {
     const fetchProduct = async () => {
       setLoading(true);
-      try {
-        const item = await apiGet<Product>(`/products/${productId}?owner_id=1`);
-        setProduct(item);
 
-        // 재고 이력 API 아직 없으면 일단 비워두기
-        setHistory([]);
+      try {
+        // ✅ mock 모드: mockProducts에서 찾기
+        if (isMockMode) {
+          const found = mockProducts.find(
+            (p) => String(p.product_id) === rawId,
+          );
+          setProduct(found ?? null);
+          setHistory([]); // 목 이력은 일단 빈 배열(원하면 생성 가능)
+          return;
+        }
+
+        // ✅ 로그인 모드: 서버에서 읽기
+        // - 서버 id 타입이 number면 rawId가 숫자일 때만 호출
+        // - 너 API가 /products/{product_id} 를 int로 받는 구조면 아래처럼 Number 변환 필요
+        const productIdNum = Number(rawId);
+        if (Number.isNaN(productIdNum)) {
+          setProduct(null);
+          return;
+        }
+
+        const ownerId = PUBLIC_OWNER_ID;
+        const item = await apiGet<Product>(
+          `/products/${productIdNum}?owner_id=${ownerId}`,
+        );
+        setProduct(item);
+        setHistory([]); // 재고 이력 API 없으면 비워두기
       } catch (e) {
         console.error(e);
         setProduct(null);
@@ -68,8 +105,8 @@ export default function ProductDetailPage() {
       }
     };
 
-    if (!Number.isNaN(productId)) fetchProduct();
-  }, [productId]);
+    fetchProduct();
+  }, [rawId, isMockMode]);
 
   const tabs = [
     { id: "overview", label: "개요" },
@@ -88,37 +125,48 @@ export default function ProductDetailPage() {
     });
   };
 
-  const handleStockAdjusted = (
-    updated: Product,
-    type: "in" | "out",
-    quantity: number,
-    note: string,
-  ) => {
-    setProduct(updated);
+  // const handleStockAdjusted = (
+  //   updated: Product,
+  //   type: "in" | "out",
+  //   quantity: number,
+  //   note: string,
+  // ) => {
+  //   setProduct(updated);
 
-    addToast(
-      "success",
-      `재고 ${type === "in" ? "입고" : "출고"}: ${quantity}개`,
-    );
+  //   addToast(
+  //     "success",
+  //     `재고 ${type === "in" ? "입고" : "출고"}: ${quantity}개`,
+  //   );
 
-    const now = new Date().toISOString();
-    const newHistory: StockHistory = {
-      id: `HST-${updated.product_id}-${Date.now()}`,
-      product_id: String(updated.product_id),
-      type,
-      quantity,
-      note: note || (type === "in" ? "Stock added" : "Stock removed"),
-      created_at: now,
-    };
+  //   const now = new Date().toISOString();
+  //   const newHistory: StockHistory = {
+  //     id: `HST-${updated.product_id}-${Date.now()}`,
+  //     product_id: String(updated.product_id),
+  //     type,
+  //     quantity,
+  //     note: note || (type === "in" ? "Stock added" : "Stock removed"),
+  //     created_at: now,
+  //   };
 
-    setHistory((prev) => [newHistory, ...prev]);
+  //   setHistory((prev) => [newHistory, ...prev]);
+  // };
+
+  const requireAuthOrGoLogin = () => {
+    if (!token) {
+      addToast("info", "로그인이 필요합니다");
+      window.location.href = "/login";
+      return false;
+    }
+    return true;
   };
 
   const handleSubmitEdit = async (data: ProductInput) => {
     if (!product) return;
+    if (!requireAuthOrGoLogin()) return;
 
     try {
-      const updated = await apiPut<Product>(`/products/${productId}`, {
+      const productIdNum = Number(rawId);
+      const updated = await apiPut<Product>(`/products/${productIdNum}`, {
         name: data.name,
         category: data.category,
         price: data.price,
@@ -127,14 +175,16 @@ export default function ProductDetailPage() {
       setProduct(updated);
       addToast("success", `"${updated.name}" 제품이 수정되었습니다`);
       setShowEditModal(false);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
 
-      if (String(e?.message ?? "") === "AUTH_REQUIRED") {
+      const msg = e instanceof Error ? e.message : String(e);
+
+      if (msg === "AUTH_REQUIRED") {
         window.location.href = "/login";
         return;
       }
-      if (String(e?.message ?? "").includes("API Error 401")) {
+      if (msg.includes("API Error 401")) {
         window.location.href = "/login";
         return;
       }
@@ -144,24 +194,29 @@ export default function ProductDetailPage() {
   };
 
   const handleDelete = async () => {
+    if (!requireAuthOrGoLogin()) return;
+
     try {
-      await apiDelete<{ ok: boolean }>(`/products/${productId}`);
+      const productIdNum = Number(rawId);
+      await apiDelete<{ ok: boolean }>(`/products/${productIdNum}`);
 
       addToast("success", `"${product?.name}" 제품이 삭제되었습니다`);
       router.push("/products");
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
 
-      if (String(e?.message ?? "") === "AUTH_REQUIRED") {
+      const msg = e instanceof Error ? e.message : String(e);
+
+      if (msg === "AUTH_REQUIRED") {
         window.location.href = "/login";
         return;
       }
-      if (String(e?.message ?? "").includes("API Error 401")) {
+      if (msg.includes("API Error 401")) {
         window.location.href = "/login";
         return;
       }
 
-      addToast("error", "제품 삭세 실패");
+      addToast("error", "제품 삭제 실패");
     }
   };
 
@@ -207,6 +262,14 @@ export default function ProductDetailPage() {
         animate={{ opacity: 1, y: 0 }}
         className="space-y-6"
       >
+        {/* (선택) mock 모드 배너 */}
+        {isMockMode && (
+          <div className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+            현재 <b>체험 모드</b>입니다. (로그인하면 수정/삭제/재고조정이
+            가능해요)
+          </div>
+        )}
+
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-sm">
           <Link
@@ -225,20 +288,40 @@ export default function ProductDetailPage() {
             <h1 className="text-2xl font-semibold text-foreground">
               {product.name}
             </h1>
-            <p className="text-muted-foreground">{product.product_id}</p>
+            <p className="text-muted-foreground">
+              {String(product.product_id)}
+            </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setShowStockModal(true)}>
+            <Button
+              variant="outline"
+              onClick={() =>
+                isMockMode ? requireAuthOrGoLogin() : setShowStockModal(true)
+              }
+              disabled={isMockMode}
+              title={isMockMode ? "로그인 후 사용 가능" : undefined}
+            >
               <Plus className="w-4 h-4 mr-2" />
               재고 조정
             </Button>
-            <Button variant="outline" onClick={() => setShowEditModal(true)}>
+            <Button
+              variant="outline"
+              onClick={() =>
+                isMockMode ? requireAuthOrGoLogin() : setShowEditModal(true)
+              }
+              disabled={isMockMode}
+              title={isMockMode ? "로그인 후 사용 가능" : undefined}
+            >
               <Edit className="w-4 h-4 mr-2" />
               수정
             </Button>
             <Button
               variant="destructive"
-              onClick={() => setShowDeleteDialog(true)}
+              onClick={() =>
+                isMockMode ? requireAuthOrGoLogin() : setShowDeleteDialog(true)
+              }
+              disabled={isMockMode}
+              title={isMockMode ? "로그인 후 사용 가능" : undefined}
             >
               <Trash2 className="w-4 h-4 mr-2" />
               삭제
@@ -283,7 +366,7 @@ export default function ProductDetailPage() {
               <div>
                 <p className="text-sm text-muted-foreground mb-1">가격</p>
                 <p className="text-2xl font-semibold text-foreground">
-                  {product.price.toLocaleString("ko-KR")}원
+                  {Number(product.price).toLocaleString("ko-KR")}원
                 </p>
               </div>
               <div>
@@ -333,7 +416,10 @@ export default function ProductDetailPage() {
                       총 가치
                     </p>
                     <p className="text-xl font-semibold text-foreground">
-                      {(product.price * product.qty).toLocaleString("ko-KR")}원
+                      {(
+                        Number(product.price) * Number(product.qty)
+                      ).toLocaleString("ko-KR")}
+                      원
                     </p>
                   </div>
                   <div className="p-4 bg-muted/30 rounded-lg">
@@ -428,7 +514,7 @@ export default function ProductDetailPage() {
         </motion.div>
       </motion.div>
 
-      {/* ✅ Modals */}
+      {/* ✅ Modals (mock 모드에서는 아예 열리지 않도록 위에서 버튼 disabled 처리) */}
       <ProductFormModal
         isOpen={showEditModal}
         onClose={() => setShowEditModal(false)}
@@ -443,6 +529,9 @@ export default function ProductDetailPage() {
         onAdjusted={(updated) => {
           setProduct(updated);
           addToast("success", "재고 조정 완료");
+
+          // (선택) history에 추가하고 싶으면 StockAdjustModal이 note/type/qty를 알려줘야 가능
+          // 지금 타입상 불가능하니 일단 제거.
         }}
       />
 

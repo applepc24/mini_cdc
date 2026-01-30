@@ -12,3 +12,6 @@ email-validator
 openai>=1.0.0
 python-multipart
 kafka-python @ git+https://github.com/dpkp/kafka-python.git
+langchain>=0.2.0
+langchain-openai>=0.1.0
+openai>=1.0.0

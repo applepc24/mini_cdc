@@ -1,7 +1,8 @@
+// src/lib/api.ts
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
-export function getAccessToken() {
+export function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("accessToken");
 }
@@ -50,7 +51,22 @@ function resolvePath(path: string, method: string) {
   return scopeRead(p);
 }
 
-async function request<T>(path: string, init: RequestInit): Promise<T> {
+// ✅ body를 unknown으로 받기 위한 확장 타입
+type RequestInitWithBody = Omit<RequestInit, "body"> & { body?: unknown };
+
+function isFormDataBody(body: unknown): body is FormData {
+  return typeof FormData !== "undefined" && body instanceof FormData;
+}
+
+// function isPlainObjectBody(body: unknown): body is Record<string, unknown> {
+//   return typeof body === "object" && body !== null && !Array.isArray(body);
+// }
+
+function isStringBody(body: unknown): body is string {
+  return typeof body === "string";
+}
+
+async function request<T>(path: string, init: RequestInitWithBody = {}): Promise<T> {
   const method = (init.method ?? "GET").toUpperCase();
   const token = getAccessToken();
 
@@ -63,35 +79,31 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
     throw new Error("AUTH_REQUIRED");
   }
 
-  // ✅ FormData 판별
-  const bodyAny = (init as any).body;
-  const isFormData =
-    typeof FormData !== "undefined" && bodyAny instanceof FormData;
+  const body = init.body;
+  const isFormData = isFormDataBody(body);
 
-  // ✅ headers 만들기: FormData면 Content-Type 절대 넣지 말기
-  const headers: Record<string, string> = {
-    ...(init.headers as Record<string, string> | undefined),
-  };
+  // ✅ headers 만들기 (RequestInit.headers는 다양한 타입이라 Headers로 통일)
+  const headers = new Headers(init.headers);
 
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (token) headers.set("Authorization", `Bearer ${token}`);
 
   // body가 있고, FormData가 아니고, Content-Type이 아직 없으면 JSON으로
-  if (!isFormData && bodyAny !== undefined && !headers["Content-Type"]) {
-    headers["Content-Type"] = "application/json";
+  if (!isFormData && body !== undefined && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
   }
 
   // ✅ body 처리:
   // - FormData: 그대로
   // - string: 그대로
   // - object: JSON.stringify
-  const finalBody =
-    bodyAny === undefined
+  const finalBody: BodyInit | null | undefined =
+    body === undefined
       ? undefined
       : isFormData
-        ? bodyAny
-        : typeof bodyAny === "string"
-          ? bodyAny
-          : JSON.stringify(bodyAny);
+        ? body
+        : isStringBody(body)
+          ? body
+          : JSON.stringify(body);
 
   const finalPath = resolvePath(path, method);
 
@@ -132,13 +144,15 @@ export function apiGet<T>(path: string) {
   return request<T>(path, { method: "GET" });
 }
 
-// ✅ 여기서 JSON.stringify 제거! (request가 알아서 처리)
-export function apiPost<T>(path: string, body: any) {
+// ✅ any 제거: unknown 사용 (request에서 stringify/처리)
+export function apiPost<T>(path: string, body: unknown) {
   return request<T>(path, { method: "POST", body });
 }
-export function apiPut<T>(path: string, body: any) {
+
+export function apiPut<T>(path: string, body: unknown) {
   return request<T>(path, { method: "PUT", body });
 }
+
 export function apiDelete<T>(path: string) {
   return request<T>(path, { method: "DELETE" });
 }
@@ -147,6 +161,7 @@ export function setAccessToken(token: string) {
   if (typeof window === "undefined") return;
   localStorage.setItem("accessToken", token);
 }
+
 export function clearAccessToken() {
   if (typeof window === "undefined") return;
   localStorage.removeItem("accessToken");
@@ -164,8 +179,8 @@ export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
 
   const url = path.startsWith("http") ? path : `${base}${path}`;
 
-  const headers: Record<string, string> = {};
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
   // ✅ FormData는 Content-Type을 직접 지정하면 boundary 깨짐. 지정하지 말 것.
 
   const res = await fetch(url, {

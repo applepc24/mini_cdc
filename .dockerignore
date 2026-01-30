@@ -1,9 +1,8 @@
 # python
 .venv/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+**/__pycache__/
+**/*.pyc
+**/*.pyo
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -12,11 +11,15 @@ __pycache__/
 .git/
 .gitignore
 
-# node (있다면)
-node_modules/
-.next/
-dist/
-build/
+# ✅ frontend 전체 제외 (가장 큼)
+frontend/
+
+# ✅ node/next 산출물 (하위 폴더까지)
+**/node_modules/
+**/.next/
+**/dist/
+**/build/
+**/out/
 
 # logs & data
 *.log

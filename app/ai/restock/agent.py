@@ -17,6 +17,7 @@ from app.ai.restock.service import (
 )
 from app.ai.restock.trace import AgentTrace
 from app.models import OutboxEvent
+from app.ai.restock.llm_explain import explain_with_llm
 
 @dataclass(frozen=True)
 class RestockAgentConfig:
@@ -97,16 +98,32 @@ class RestockAgent:
         return self.db.query(q.exists()).scalar()
 
     def recommend_with_meta(
-        self, owner_id: int, threshold: int, limit: int
+        self, owner_id: int, threshold: int, limit: int, explain_llm: bool = False
     ) -> tuple[list[RestockRecommendation], dict]:
         trace = AgentTrace()
-        trace.add("input", ownerId=owner_id, threshold=threshold, limit=limit)
-
+        trace.add("input", ownerId=owner_id, threshold=threshold, limit=limit, explainLLM=explain_llm)
         recs = self.recommend(owner_id=owner_id, threshold=threshold, limit=limit)
-        trace.add("recommend_done", count=len(recs))
 
-        meta = {
-            "summary": summarize(recs, threshold),
+        summary = summarize(recs, threshold)
+
+        meta: dict = {
+            "summary": summary,
             "trace": [s.__dict__ for s in trace.steps],
         }
+
+        # ✅ LLM 설명은 옵션 (기본 OFF)
+        if explain_llm:
+            # 너무 길어지는 것 방지: 추천 필요한 것만 + 상위 N개만
+            need = [r for r in recs if r.recommendIn > 0]
+            need_sorted = sorted(need, key=lambda x: x.recommendIn, reverse=True)[:20]
+
+            trace.add("llm_explain_start", count=len(need_sorted))
+            llm_exp = explain_with_llm(need_sorted, summary)
+            meta["llm"] = llm_exp
+            trace.add("llm_explain_done")
+
+            # trace 갱신
+            meta["trace"] = [s.__dict__ for s in trace.steps]
+            
+
         return recs, meta

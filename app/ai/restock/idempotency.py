@@ -85,7 +85,7 @@ def idem_start_or_get(
 
         raise HTTPException(
             status_code=409,
-            detail=f"idempotency_key already used and status=STARTED (in progress).",
+            detail="idempotency_key already used and status=STARTED (in progress).",
         )
 
     raise HTTPException(
