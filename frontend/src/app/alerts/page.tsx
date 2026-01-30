@@ -14,7 +14,7 @@ import {
   CardSkeleton,
   TableRowSkeleton,
 } from "@/components/ui/skeleton-loader";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 import { getStockStatus } from "@/lib/utils/stock";
 import { useSettings } from "@/hooks/use-settings";
 import { useAppToast } from "@/hooks/use-app-toast";
@@ -34,18 +34,75 @@ const itemVariants = {
 };
 
 export default function AlertsPage() {
+  type Reason = "product_sales" | "category_sales" | "threshold_fallback";
+
+  type RestockRecommendation = {
+    productId: number;
+    name: string;
+    category?: string | null;
+    currentQty: number;
+    avgDaily: number;
+    targetQty: number;
+    recommendIn: number;
+    reason: Reason;
+    windowDays: number;
+    coverDays?: number | null;
+  };
+
+  type AgentResponse = {
+    ok: boolean;
+    summary: {
+      threshold: number;
+      needCount: number;
+      totalInQty: number;
+      byReason: Record<string, number>;
+      topNeeds: {
+        productId: number;
+        name: string;
+        recommendIn: number;
+        reason: string;
+      }[];
+    };
+    items: RestockRecommendation[];
+    plan: { productId: number; quantity: number; note?: string | null }[];
+    idempotency: {
+      key?: string | null;
+      status: "NONE" | "STARTED" | "DONE" | "FAILED" | "REUSED";
+      reused: boolean;
+    };
+  };
+
   const { settings, updateSettings } = useSettings();
   const { addToast } = useAppToast();
 
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [localThreshold, setLocalThreshold] = useState(settings.threshold);
+  const [agent, setAgent] = useState<AgentResponse | null>(null);
+  const [agentLoading, setAgentLoading] = useState(false);
+
+  const reasonLabel: Record<string, string> = {
+    product_sales: "상품 판매 기반",
+    category_sales: "카테고리 판매 기반",
+    threshold_fallback: "임계값 기준(대체)",
+  };
+
+  const reasonOrder: Reason[] = [
+    "product_sales",
+    "category_sales",
+    "threshold_fallback",
+  ];
+
+  const reasonBadge = (reason: Reason) => {
+    const label = reasonLabel[reason] ?? reason;
+    return label;
+  };
 
   const fetchLowStock = async (threshold: number) => {
     setLoading(true);
     try {
       const res = await apiGet<{ count: number; items: Product[] }>(
-        `/alerts/low-stock?owner_id=1&threshold=${threshold}&limit=200`
+        `/alerts/low-stock?owner_id=1&threshold=${threshold}&limit=200`,
       );
       setProducts(res.items);
     } catch (e) {
@@ -56,6 +113,31 @@ export default function AlertsPage() {
       setLoading(false);
     }
   };
+  const callAgentRecommend = async () => {
+    setAgentLoading(true);
+    try {
+      const res = await apiPost<AgentResponse>(
+        `/ai/restock/agent?dry_run=true&threshold=${localThreshold}&limit=200`,
+        {},
+      );
+      setAgent(res);
+      addToast("success", `추천 ${res.summary.needCount}건 생성됨`);
+    } catch (e: any) {
+      console.error(e);
+      const msg = String(e?.message || "");
+      if (msg.includes("AUTH_REQUIRED")) {
+        addToast("error", "로그인이 필요합니다");
+        return;
+      }
+      addToast("error", "재입고 추천 호출 실패");
+    } finally {
+      setAgentLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setLocalThreshold(settings.threshold);
+  }, [settings.threshold]);
 
   useEffect(() => {
     fetchLowStock(settings.threshold);
@@ -247,12 +329,136 @@ export default function AlertsPage() {
           </Button>
           <Button
             variant="outline"
-            onClick={() => addToast("info", "곧 제공될 예정입니다!")}
+            onClick={callAgentRecommend}
+            disabled={agentLoading}
           >
             <Sparkles className="w-4 h-4 mr-2" />
-            자동 재입고 추천
+            {agentLoading ? "추천 생성 중..." : "자동 재입고 추천 보기"}
           </Button>
         </motion.div>
+        {agent && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+            className="bg-card rounded-xl border border-border p-6"
+          >
+            <div className="flex items-start gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">
+                  자동 재입고 추천
+                </h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  추천 품목{" "}
+                  <span className="text-foreground font-medium">
+                    {agent.summary.needCount}
+                  </span>
+                  개 · 총 권장수량{" "}
+                  <span className="text-foreground font-medium">
+                    {agent.summary.totalInQty}
+                  </span>
+                </p>
+              </div>
+            </div>
+
+            {/* Summary chips */}
+            <div className="mt-4 flex flex-wrap gap-2">
+              {reasonOrder
+                .filter((r) => (agent.summary.byReason?.[r] ?? 0) > 0)
+                .map((r) => (
+                  <span
+                    key={r}
+                    className="inline-flex items-center rounded-full border border-border bg-muted/50 px-3 py-1 text-xs text-muted-foreground"
+                  >
+                    {reasonBadge(r as Reason)} · {agent.summary.byReason[r]}
+                  </span>
+                ))}
+            </div>
+
+            {/* Top needs */}
+            {agent.summary.topNeeds?.length > 0 && (
+              <div className="mt-3 text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">Top 3</span>:{" "}
+                {agent.summary.topNeeds
+                  .slice(0, 3)
+                  .map((t) => `${t.name} +${t.recommendIn}`)
+                  .join(" · ")}
+              </div>
+            )}
+
+            {agent.summary.needCount === 0 ? (
+              <p className="text-sm text-muted-foreground mt-4">
+                재입고가 필요한 항목이 없습니다.
+              </p>
+            ) : (
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">
+                        품목
+                      </th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">
+                        카테고리
+                      </th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-muted-foreground uppercase">
+                        현재
+                      </th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-muted-foreground uppercase">
+                        목표
+                      </th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-muted-foreground uppercase">
+                        권장
+                      </th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">
+                        근거
+                      </th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-muted-foreground uppercase">
+                        소진(일)
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-border">
+                    {agent.items
+                      .filter((x) => x.recommendIn > 0)
+                      .sort((a, b) => b.recommendIn - a.recommendIn)
+                      .map((x) => (
+                        <tr key={x.productId} className="hover:bg-muted/30">
+                          <td className="px-4 py-2">
+                            <p className="text-sm font-medium text-foreground">
+                              {x.name}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {x.productId}
+                            </p>
+                          </td>
+                          <td className="px-4 py-2 text-sm text-muted-foreground">
+                            {x.category ?? "-"}
+                          </td>
+                          <td className="px-4 py-2 text-sm text-foreground text-right font-medium">
+                            {x.currentQty}
+                          </td>
+                          <td className="px-4 py-2 text-sm text-foreground text-right font-medium">
+                            {x.targetQty}
+                          </td>
+                          <td className="px-4 py-2 text-sm text-foreground text-right font-semibold">
+                            {x.recommendIn}
+                          </td>
+                          <td className="px-4 py-2 text-sm text-muted-foreground">
+                            {reasonLabel[x.reason] ?? x.reason}
+                          </td>
+                          <td className="px-4 py-2 text-sm text-muted-foreground text-right">
+                            {x.coverDays ?? "-"}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </motion.div>
+        )}
 
         {/* Low Stock Table */}
         <motion.div
@@ -330,8 +536,8 @@ export default function AlertsPage() {
                             product.qty === 0
                               ? "text-red-500"
                               : product.qty < 5
-                              ? "text-orange-500"
-                              : "text-yellow-500"
+                                ? "text-orange-500"
+                                : "text-yellow-500"
                           }`}
                         >
                           {product.qty}

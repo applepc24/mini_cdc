@@ -11,6 +11,11 @@ function normalizePath(path: string) {
   return path;
 }
 
+function isAiPath(path: string) {
+  const p = normalizePath(path);
+  return p.startsWith("/ai/");
+}
+
 // ✅ 읽기 요청(= read model)은 토큰 유무에 따라 /public vs /search로
 function scopeRead(path: string) {
   const p = normalizePath(path);
@@ -21,7 +26,7 @@ function scopeRead(path: string) {
 // ✅ writer 요청은 /products (토큰 필수)
 function isWriterPath(path: string) {
   const p = normalizePath(path);
-  return p.startsWith("/products");
+  return p.startsWith("/products") || p.startsWith("/ai/");
 }
 
 function resolvePath(path: string, method: string) {
@@ -29,6 +34,8 @@ function resolvePath(path: string, method: string) {
 
   // auth/health는 항상 그대로
   if (p.startsWith("/auth") || p === "/health") return p;
+
+  if (p.startsWith("/ai/")) return p;
 
   // 이미 prefix가 붙어있으면 그대로
   if (p.startsWith("/public") || p.startsWith("/search")) return p;
@@ -49,6 +56,10 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
 
   // ✅ writer인데 토큰 없으면 프론트에서 바로 막기 (서버 로그도 깨끗해짐)
   if (method !== "GET" && isWriterPath(path) && !token) {
+    throw new Error("AUTH_REQUIRED");
+  }
+
+  if (isAiPath(path) && !token) {
     throw new Error("AUTH_REQUIRED");
   }
 

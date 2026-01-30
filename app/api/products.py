@@ -4,7 +4,7 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user
@@ -15,7 +15,7 @@ from app.crud import (
     update_product_with_outbox,
 )
 from app.db import get_db
-from app.models import Product, User
+from app.models import Product, User, Stock, InventoryEvent
 from app.schemas import ProductCreate, ProductOut, ProductUpdate
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -33,8 +33,11 @@ class ImportRowError(BaseModel):
 
 
 class ImportResponse(BaseModel):
-    inserted: int
-    skipped: int
+    ok: bool
+    created: int
+    updated: int
+    unchanged: int
+    failed: int
     errors: list[ImportRowError] = []
 
 
@@ -45,6 +48,11 @@ def create_product(
     current_user: User = Depends(get_current_user),
 ):
     product, stock = create_product_with_outbox(db, current_user.id, payload)
+
+    db.commit()
+    db.refresh(product)
+    db.refresh(stock)
+
     return ProductOut(
         id=product.id,
         name=product.name,
@@ -66,6 +74,11 @@ def update_product(
         raise HTTPException(status_code=404, detail="product not found")
 
     product, stock = result
+
+    db.commit()
+    db.refresh(product)
+    db.refresh(stock)
+
     return ProductOut(
         id=product.id,
         name=product.name,
@@ -97,6 +110,11 @@ def adjust_stock(
         raise HTTPException(status_code=400, detail="Stock cannot be negative")
 
     product, stock = result
+
+    db.commit()
+    db.refresh(product)
+    db.refresh(stock)
+
     return ProductOut(
         id=product.id,
         name=product.name,
@@ -115,6 +133,8 @@ def delete_product(
     ok = soft_delete_product_with_outbox(db, current_user.id, product_id)
     if not ok:
         raise HTTPException(status_code=404, detail="product not found")
+    
+    db.commit()
     return {"ok": True}
 
 
@@ -151,41 +171,58 @@ def import_products_csv(
     headers = set([h.strip() for h in (reader.fieldnames or []) if h])
     missing = sorted(list(required - headers))
     if missing:
-        raise HTTPException(
-            status_code=400, detail=f"CSV 헤더 누락: {', '.join(missing)}"
-        )
+        raise HTTPException(status_code=400, detail=f"CSV 헤더 누락: {', '.join(missing)}")
 
-    inserted = 0
-    skipped = 0
+    created = 0
+    updated = 0
+    unchanged = 0
+    failed = 0
     errors: list[ImportRowError] = []
 
-    # ✅ (성능) 기존 상품 name을 한 번에 읽어서 Set으로 캐시
-    # - owner_id 기준으로 name만 가져오기
-    existing_names = set(
+    # ✅ (성능) 현재 DB 상태를 한 번에 로딩: name -> (product_id, category, price, qty)
+    rows = (
         db.execute(
-            select(Product.name).where(
+            select(
+                Product.id.label("id"),
+                Product.name.label("name"),
+                Product.category.label("category"),
+                Product.price.label("price"),
+                func.coalesce(Stock.qty, 0).label("qty"),
+            )
+            .outerjoin(
+                Stock,
+                (Stock.product_id == Product.id) & (Stock.owner_id == Product.owner_id),
+            )
+            .where(
                 Product.owner_id == current_user.id,
                 Product.is_deleted.is_(False),
             )
         )
-        .scalars()
         .all()
     )
 
+    existing_by_name: dict[str, dict] = {
+        r.name: {"id": r.id, "category": r.category, "price": r.price, "qty": r.qty}
+        for r in rows
+    }
+
+    # CSV 내 중복 방지(마지막 행 우선 같은 정책 애매해서, 그냥 에러로 처리)
+    seen_in_csv: set[str] = set()
+
     for idx, row in enumerate(reader, start=2):  # header가 1행
         try:
-            name = (row.get("name") or "").strip()
-            category = (row.get("category") or "").strip()
+            with db.begin_nested():
+                name = (row.get("name") or "").strip()
+                category = (row.get("category") or "").strip()
 
             if not name:
                 raise ValueError("name이 비어있음")
             if not category:
                 raise ValueError("category가 비어있음")
 
-            # ✅ 중복 스킵 정책
-            if name in existing_names:
-                skipped += 1
-                continue
+            if name in seen_in_csv:
+                raise ValueError("CSV 내 name 중복")
+            seen_in_csv.add(name)
 
             try:
                 price = int(str(row.get("price") or "").strip())
@@ -202,19 +239,96 @@ def import_products_csv(
             if qty < 0:
                 raise ValueError("qty는 0 이상이어야 함")
 
-            payload = ProductCreate(name=name, category=category, price=price, qty=qty)
+            # ---------------------------
+            # ✅ snapshot 적용 로직
+            # ---------------------------
+            existing = existing_by_name.get(name)
 
-            # ✅ outbox 생성 재사용
-            product, stock = create_product_with_outbox(db, current_user.id, payload)
+            if existing is None:
+                # 새 상품 생성(=현재 qty로 시작)
+                payload = ProductCreate(name=name, category=category, price=price, qty=qty)
+                product, stock = create_product_with_outbox(db, current_user.id, payload)
 
-            inserted += 1
-            existing_names.add(name)  # ✅ 같은 CSV 내 중복도 스킵되게
+                # snapshot 이벤트 기록
+                db.add(
+                    InventoryEvent(
+                        owner_id=current_user.id,
+                        product_id=product.id,
+                        event_type="snapshot",
+                        delta_qty=0,
+                        snapshot_qty=qty,
+                        note="csv_snapshot",
+                    )
+                )
+
+                created += 1
+                existing_by_name[name] = {"id": product.id, "category": category, "price": price, "qty": qty}
+
+            else:
+                changed = False
+                product_id = existing["id"]
+
+                # (1) 상품 메타데이터 업데이트 (category/price)
+                if category != existing["category"] or price != existing["price"]:
+                    update_product_with_outbox(
+                        db,
+                        current_user.id,
+                        product_id,
+                        ProductUpdate(category=category, price=price),
+                    )
+                    changed = True
+
+                # (2) 재고를 "절대값 qty"로 맞추기 위해 diff 계산
+                prev_qty = int(existing["qty"])
+                diff = qty - prev_qty
+                if diff != 0:
+                    adj_type = "in" if diff > 0 else "out"
+                    result = adjust_stock_with_outbox(
+                        db,
+                        owner_id=current_user.id,
+                        product_id=product_id,
+                        adj_type=adj_type,
+                        quantity=abs(diff),
+                        note="snapshot_apply",
+                    )
+                    if result == "NEGATIVE":
+                        raise ValueError("qty가 현재 재고보다 작아서 음수가 됨")
+                    changed = True
+
+                # (3) snapshot 이벤트는 항상 남김(스냅샷 히스토리)
+                db.add(
+                    InventoryEvent(
+                        owner_id=current_user.id,
+                        product_id=product_id,
+                        event_type="snapshot",
+                        delta_qty=0,
+                        snapshot_qty=qty,
+                        note="csv_snapshot",
+                    )
+                )
+
+                if changed:
+                    updated += 1
+                else:
+                    unchanged += 1
+
+                # 캐시 갱신(다음 행 영향/CSV 내부 중복 방지)
+                existing["category"] = category
+                existing["price"] = price
+                existing["qty"] = qty
 
         except Exception as e:
+            failed += 1
             errors.append(ImportRowError(row=idx, reason=str(e)))
 
+    # inventory_events 등 남은 변경 commit
+    db.commit()
+
     return ImportResponse(
-        inserted=inserted,
-        skipped=skipped,
+        ok=True,
+        created=created,
+        updated=updated,
+        unchanged=unchanged,
+        failed=failed,
         errors=errors[:50],
     )

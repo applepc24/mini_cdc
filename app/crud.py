@@ -48,12 +48,7 @@ def create_product_with_outbox(db: Session, owner_id: int, data: ProductCreate):
     )
     db.add(event)
 
-    # (4) 한 번에 커밋!
-    db.commit()
-
-    # 새로고침(최신 상태 반영)
-    db.refresh(product)
-    db.refresh(stock)
+    db.flush()
 
     return product, stock
 
@@ -80,7 +75,7 @@ def update_product_with_outbox(
     # (2) Stock 찾기 (없으면 만들기)
     stock = db.get(Stock, product_id)
     if not stock:
-        stock = Stock(product_id=product_id, qty=0)
+        stock = Stock(product_id=product_id, owner_id=owner_id, qty=0)
         db.add(stock)
 
     # (3) 들어온 값만 반영 (부분 수정)
@@ -109,11 +104,7 @@ def update_product_with_outbox(
     )
     db.add(event)
 
-    # (5) 한 번에 커밋!
-    db.commit()
-
-    db.refresh(product)
-    db.refresh(stock)
+    db.flush()
 
     return product, stock
 
@@ -160,8 +151,7 @@ def soft_delete_product_with_outbox(db: Session, owner_id: int, product_id: int)
     )
     db.add(event)
 
-    # 5) 커밋
-    db.commit()
+    db.flush()
 
     return True
 
@@ -226,8 +216,6 @@ def adjust_stock_with_outbox(
     )
     db.add(event)
 
-    db.commit()
-    db.refresh(product)
-    db.refresh(stock)
+    db.flush()
 
     return product, stock

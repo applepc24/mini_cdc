@@ -6,15 +6,19 @@ from sqlalchemy import (
     TIMESTAMP,
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
+    DateTime,
     ForeignKey,
     Integer,
     String,
     Text,
+    func,
     text,
-    DateTime
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db import Base
 
@@ -145,4 +149,58 @@ class User(Base):
         server_default=text("CURRENT_TIMESTAMP"),
         server_onupdate=text("CURRENT_TIMESTAMP"),
         nullable=False,
+    )
+
+
+class InventoryEvent(Base):
+    __tablename__ = "inventory_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    product_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("products.id", ondelete="CASCADE"), nullable=False
+    )
+
+    event_type: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # snapshot/receipt/adjust
+    delta_qty: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    snapshot_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[object] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('snapshot','receipt','adjust')",
+            name="inventory_events_type_check",
+        ),
+        CheckConstraint(
+            "(event_type = 'snapshot' AND snapshot_qty IS NOT NULL) OR (event_type <> 'snapshot' AND snapshot_qty IS NULL)",
+            name="inventory_events_snapshot_rule",
+        ),
+    )
+
+class RestockIdempotency(Base):
+    __tablename__ = "restock_idempotency"
+
+    id = Column(BigInteger, primary_key=True)
+    owner_id = Column(Integer, nullable=False)
+    idem_key = Column(Text, nullable=False)
+    endpoint = Column(Text, nullable=False)
+
+    request_json = Column(JSONB, nullable=False)
+    response_json = Column(JSONB, nullable=True)
+
+    status = Column(Text, nullable=False, server_default="STARTED")  # STARTED | DONE | FAILED
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("owner_id", "idem_key", "endpoint", name="ux_restock_idem"),
     )
