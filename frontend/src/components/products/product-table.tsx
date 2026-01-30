@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useLayoutEffect,
+} from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
@@ -16,8 +22,8 @@ interface ProductTableProps {
   products: Product[];
   loading?: boolean;
   threshold: number;
-  selectedIds: number[];
-  onSelectionChange: (ids: number[]) => void;
+  selectedIds: string[];
+  onSelectionChange: React.Dispatch<React.SetStateAction<string[]>>;
   onEdit: (product: Product) => void;
   onDelete: (product: Product) => void;
   onStockAdjust: (product: Product) => void;
@@ -37,11 +43,11 @@ export function ProductTable({
 }: ProductTableProps) {
   const router = useRouter();
 
-  const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [deleteProduct, setDeleteProduct] = useState<Product | null>(null);
 
   // ✅ 메뉴 버튼 DOM 저장
-  const triggerRefs = useRef<Record<number, HTMLButtonElement | null>>({});
+  const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
@@ -51,7 +57,7 @@ export function ProductTable({
     [menuOpenId, products],
   );
 
-  const toggleSelect = (id: number) => {
+  const toggleSelect = (id: string) => {
     if (selectedIds.includes(id)) {
       onSelectionChange(selectedIds.filter((i) => i !== id));
     } else {
@@ -78,7 +84,7 @@ export function ProductTable({
   };
 
   // ✅ 메뉴 위치 계산 (버튼 기준으로 화면에 fixed로 띄움)
-  const computeMenuPos = (id: number) => {
+  const computeMenuPos = (id: string) => {
     const el = triggerRefs.current[id];
     if (!el) return;
 
@@ -108,7 +114,7 @@ export function ProductTable({
   };
 
   // ✅ 메뉴 열기/닫기
-  const toggleMenu = (id: number) => {
+  const toggleMenu = (id: string) => {
     setMenuOpenId((prev) => {
       const next = prev === id ? null : id;
       return next;
@@ -116,7 +122,7 @@ export function ProductTable({
   };
 
   // ✅ 메뉴가 열리면 위치 계산
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (menuOpenId == null) {
       setMenuPos(null);
       return;
@@ -165,7 +171,6 @@ export function ProductTable({
       window.removeEventListener("scroll", onReposition, true);
       window.removeEventListener("resize", onReposition);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menuOpenId]);
 
   if (loading) {
@@ -228,7 +233,8 @@ export function ProductTable({
                   <input
                     type="checkbox"
                     checked={
-                      selectedIds.length === products.length && products.length > 0
+                      selectedIds.length === products.length &&
+                      products.length > 0
                     }
                     onChange={toggleSelectAll}
                     className="w-4 h-4 rounded border-input text-primary focus:ring-primary"
@@ -266,7 +272,10 @@ export function ProductTable({
                   className="hover:bg-muted/30 transition-colors cursor-pointer"
                   onClick={() => router.push(`/products/${product.product_id}`)}
                 >
-                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                  <td
+                    className="px-4 py-3"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <input
                       type="checkbox"
                       checked={selectedIds.includes(product.product_id)}
@@ -277,12 +286,18 @@ export function ProductTable({
 
                   <td className="px-4 py-3">
                     <div>
-                      <p className="font-medium text-foreground">{product.name}</p>
-                      <p className="text-xs text-muted-foreground">{product.product_id}</p>
+                      <p className="font-medium text-foreground">
+                        {product.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {product.product_id}
+                      </p>
                     </div>
                   </td>
 
-                  <td className="px-4 py-3 text-sm text-muted-foreground">{product.category}</td>
+                  <td className="px-4 py-3 text-sm text-muted-foreground">
+                    {product.category}
+                  </td>
 
                   <td className="px-4 py-3 text-sm text-foreground text-right font-medium">
                     {product.price.toLocaleString("ko-KR")}원
@@ -297,10 +312,15 @@ export function ProductTable({
                   </td>
 
                   <td className="px-4 py-3">
-                    <StatusBadge status={getStockStatus(product.qty, threshold)} />
+                    <StatusBadge
+                      status={getStockStatus(product.qty, threshold)}
+                    />
                   </td>
 
-                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                  <td
+                    className="px-4 py-3"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <button
                       ref={(el) => {
                         triggerRefs.current[product.product_id] = el;
@@ -319,7 +339,9 @@ export function ProductTable({
       </div>
 
       {/* ✅ 메뉴는 body에 Portal로 렌더링 (테이블/스크롤과 무관) */}
-      {menuOpenId != null && menuPos != null && openProduct != null &&
+      {menuOpenId != null &&
+        menuPos != null &&
+        openProduct != null &&
         typeof document !== "undefined" &&
         createPortal(
           <div
