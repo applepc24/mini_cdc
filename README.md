@@ -42,13 +42,6 @@
 
 ![CDC / Projection Pipeline](./mini_cdc.drawio.svg)
 
-### Outbox State Machine (diagram)
-<!-- TODO: Outbox 상태 머신 다이어그램 넣기 (NEW → PROCESSING → SENT / FAILED) -->
-<!-- 예: docs/outbox-state-machine.png -->
-<!-- ![Outbox State Machine](docs/outbox-state-machine.png) -->
-
----
-
 ## Key Features
 
 ### 1) CQRS + Projection(Read Model)
@@ -148,6 +141,7 @@
 ### 1) 전체 실행 (Docker Compose)
 ```bash
 docker compose up -d --build
+
 
 
 
