@@ -40,7 +40,7 @@
 
 ### CDC / Projection Pipeline (diagram)
 <!-- TODO: CDC 파이프라인 다이어그램 넣기 (Relay → Consumer → Projection) -->
- /Mini_CDC/mini_cdc.drawio.svg
+ /mini_cdc.drawio.svg
 <!-- ![CDC Pipeline](docs/stackops-cdc-pipeline.png) -->
 
 ### Outbox State Machine (diagram)
@@ -149,5 +149,6 @@
 ### 1) 전체 실행 (Docker Compose)
 ```bash
 docker compose up -d --build
+
 
 
