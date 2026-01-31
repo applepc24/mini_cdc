@@ -26,7 +26,7 @@ interface CommandPaletteProps {
 
 export function CommandPalette({ isOpen, onClose, onNewProduct }: CommandPaletteProps) {
   const router = useRouter()
-  const { theme, setTheme, resolvedTheme } = useTheme()
+  const { setTheme, resolvedTheme } = useTheme()
   const [search, setSearch] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
 

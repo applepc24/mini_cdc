@@ -10,6 +10,19 @@ type LoginResponse =
   | { token: string }
   | { accessToken: string };
 
+function getErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
+
+// ✅ any 없이 토큰 추출 (타입가드)
+function pickToken(res: LoginResponse): string | null {
+  if ("access_token" in res) return res.access_token;
+  if ("token" in res) return res.token;
+  if ("accessToken" in res) return res.accessToken;
+  return null;
+}
+
 export const LoginForm = () => {
   const router = useRouter();
 
@@ -20,7 +33,7 @@ export const LoginForm = () => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const handleSubmit = async (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError("");
 
@@ -32,21 +45,17 @@ export const LoginForm = () => {
         password,
       });
 
-      // 백엔드 구현에 따라 키 이름이 다를 수 있어서 넓게 대응
-      const token =
-        (res as any).access_token ?? (res as any).token ?? (res as any).accessToken;
+      const token = pickToken(res);
 
       if (!token) {
         throw new Error("로그인 응답에 토큰이 없습니다. (/auth/login 응답 확인 필요)");
       }
 
       setAccessToken(token);
-
-      // 로그인 성공 → 대시보드 이동
       router.push("/dashboard");
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err?.message ?? "로그인 실패");
+      setError(getErrorMessage(err) || "로그인 실패");
     } finally {
       setSubmitting(false);
     }
@@ -81,7 +90,11 @@ export const LoginForm = () => {
           onClick={() => setShowPassword((v) => !v)}
           className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
         >
-          {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+          {showPassword ? (
+            <EyeOff className="w-5 h-5" />
+          ) : (
+            <Eye className="w-5 h-5" />
+          )}
         </button>
       </div>
 

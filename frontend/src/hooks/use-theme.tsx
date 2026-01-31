@@ -1,74 +1,64 @@
-'use client'
+"use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import * as React from "react";
 
-type Theme = 'light' | 'dark' | 'system'
+export type Theme = "light" | "dark" | "system";
 
-interface ThemeContextType {
-  theme: Theme
-  setTheme: (theme: Theme) => void
-  resolvedTheme: 'light' | 'dark'
+const STORAGE_KEY = "stockpulse-theme";
+
+function getInitialTheme(): Theme {
+  if (typeof window === "undefined") return "system";
+  const stored = window.localStorage.getItem(STORAGE_KEY) as Theme | null;
+  return stored ?? "system";
 }
 
-const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
-
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>('system')
-  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light')
-
-  useEffect(() => {
-    const stored = localStorage.getItem('stockpulse-theme') as Theme | null
-    if (stored) {
-      setTheme(stored)
-    }
-  }, [])
-
-  useEffect(() => {
-    const root = window.document.documentElement
-    
-    const updateTheme = () => {
-      let resolved: 'light' | 'dark'
-      
-      if (theme === 'system') {
-        resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-      } else {
-        resolved = theme
-      }
-      
-      setResolvedTheme(resolved)
-      root.classList.remove('light', 'dark')
-      root.classList.add(resolved)
-    }
-
-    updateTheme()
-
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-    const handleChange = () => {
-      if (theme === 'system') {
-        updateTheme()
-      }
-    }
-
-    mediaQuery.addEventListener('change', handleChange)
-    return () => mediaQuery.removeEventListener('change', handleChange)
-  }, [theme])
-
-  const handleSetTheme = (newTheme: Theme) => {
-    setTheme(newTheme)
-    localStorage.setItem('stockpulse-theme', newTheme)
+function resolveTheme(theme: Theme): "light" | "dark" {
+  if (theme === "system") {
+    if (typeof window === "undefined") return "light";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
   }
-
-  return (
-    <ThemeContext.Provider value={{ theme, setTheme: handleSetTheme, resolvedTheme }}>
-      {children}
-    </ThemeContext.Provider>
-  )
+  return theme;
 }
 
 export function useTheme() {
-  const context = useContext(ThemeContext)
-  if (context === undefined) {
-    throw new Error('useTheme must be used within a ThemeProvider')
-  }
-  return context
+  // ✅ 초기값은 여기서 결정 (effect에서 setState 금지 룰 회피)
+  const [theme, setTheme] = React.useState<Theme>(getInitialTheme);
+
+  // ✅ effect는 외부 시스템 동기화만: DOM / localStorage
+  React.useEffect(() => {
+    const resolved = resolveTheme(theme);
+
+    // localStorage 저장
+    window.localStorage.setItem(STORAGE_KEY, theme);
+
+    // HTML에 반영 (Tailwind dark 모드용)
+    const root = document.documentElement;
+    root.classList.remove("light", "dark");
+    root.classList.add(resolved);
+  }, [theme]);
+
+  // system 테마일 때 OS 테마 변경을 즉시 반영하고 싶다면 (선택)
+  React.useEffect(() => {
+    if (theme !== "system") return;
+
+    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => {
+      const resolved = resolveTheme("system");
+      const root = document.documentElement;
+      root.classList.remove("light", "dark");
+      root.classList.add(resolved);
+    };
+
+    // 초기 1회 반영
+    onChange();
+
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, [theme]);
+  
+  const resolvedTheme = React.useMemo(() => resolveTheme(theme), [theme]);
+
+  return { theme, setTheme, resolvedTheme };
 }

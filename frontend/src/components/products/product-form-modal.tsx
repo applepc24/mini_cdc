@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import type React from "react";
 
 import { Modal } from "@/components/ui/modal";
@@ -19,9 +19,16 @@ type SubmitPayload = ProductCreateInput | ProductUpdateInput;
 interface ProductFormModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (data: SubmitPayload) => void; // ✅ 생성/수정 모두 받기
+  onSubmit: (data: SubmitPayload) => void;
   product?: Product | null;
 }
+
+type FormData = {
+  name: string;
+  category: string;
+  price: string;
+  qty: string;
+};
 
 export function ProductFormModal({
   isOpen,
@@ -30,56 +37,55 @@ export function ProductFormModal({
   product,
 }: ProductFormModalProps) {
   const categories = getCategories();
+  const isEditMode = !!product;
 
-  const [formData, setFormData] = useState({
-    name: "",
-    category: categories[0] ?? "",
-    price: "",
-    qty: "",
-  });
-
-  const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const isEditMode = !!product; // ✅ 수정 모드 여부
-
-  useEffect(() => {
-    if (!isOpen) return;
-
+  // ✅ product / categories 기반 "초기값"만 계산
+  const initialFormData = useMemo<FormData>(() => {
     if (product) {
-      setFormData({
+      return {
         name: product.name,
         category: product.category,
         price: String(product.price),
-        qty: String(product.qty), // 수정 모드에서는 화면에 안 보여도 값은 유지 가능
-      });
-    } else {
-      setFormData({
-        name: "",
-        category: categories[0] ?? "",
-        price: "",
-        qty: "",
-      });
+        qty: String(product.qty),
+      };
     }
 
-    setErrors({});
-  }, [product, isOpen, categories]);
+    return {
+      name: "",
+      category: categories[0] ?? "",
+      price: "",
+      qty: "",
+    };
+  }, [product, categories]);
 
-  const validate = () => {
+  // ✅ state는 초기값으로만 세팅 (리마운트되면 자동 초기화됨)
+  const [formData, setFormData] = useState<FormData>(initialFormData);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
 
     if (!formData.name.trim()) newErrors.name = "이름을 입력해 주세요";
     if (!formData.category) newErrors.category = "카테고리를 선택해 주세요";
-    if (!formData.price || Number(formData.price) <= 0)
+    if (!formData.price || Number(formData.price) <= 0) {
       newErrors.price = "유효한 가격을 입력해 주세요";
+    }
 
     // ✅ 생성 모드일 때만 qty 검사
     if (!isEditMode) {
-      if (formData.qty === "" || Number(formData.qty) < 0)
+      if (formData.qty === "" || Number(formData.qty) < 0) {
         newErrors.qty = "유효한 수량을 입력해 주세요";
+      }
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  const handleClose = () => {
+    // ✅ 닫을 때 에러만 정리 (setState in effect 아니고 이벤트 핸들러라 OK)
+    setErrors({});
+    onClose();
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -87,7 +93,6 @@ export function ProductFormModal({
     if (!validate()) return;
 
     if (isEditMode) {
-      // ✅ 수정: qty 없이 전송
       const payload: ProductUpdateInput = {
         name: formData.name.trim(),
         category: formData.category,
@@ -95,7 +100,6 @@ export function ProductFormModal({
       };
       onSubmit(payload);
     } else {
-      // ✅ 생성: qty 포함 전송
       const payload: ProductCreateInput = {
         name: formData.name.trim(),
         category: formData.category,
@@ -105,13 +109,13 @@ export function ProductFormModal({
       onSubmit(payload);
     }
 
-    onClose();
+    handleClose();
   };
 
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleClose}
       title={isEditMode ? "제품 수정" : "새 제품 추가"}
       size="md"
     >
@@ -121,9 +125,11 @@ export function ProductFormModal({
           <Input
             id="name"
             value={formData.name}
-            onChange={(e) =>
-              setFormData((prev) => ({ ...prev, name: e.target.value }))
-            }
+            onChange={(e) => {
+              const v = e.target.value;
+              setFormData((prev) => ({ ...prev, name: v }));
+              if (errors.name) setErrors((prev) => ({ ...prev, name: "" }));
+            }}
             placeholder="제품명을 입력하세요"
             className={errors.name ? "border-red-500" : ""}
           />
@@ -137,9 +143,11 @@ export function ProductFormModal({
           <select
             id="category"
             value={formData.category}
-            onChange={(e) =>
-              setFormData((prev) => ({ ...prev, category: e.target.value }))
-            }
+            onChange={(e) => {
+              const v = e.target.value;
+              setFormData((prev) => ({ ...prev, category: v }));
+              if (errors.category) setErrors((prev) => ({ ...prev, category: "" }));
+            }}
             className={`w-full h-10 px-3 bg-background border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 ${
               errors.category ? "border-red-500" : "border-input"
             }`}
@@ -163,9 +171,11 @@ export function ProductFormModal({
               id="price"
               type="number"
               value={formData.price}
-              onChange={(e) =>
-                setFormData((prev) => ({ ...prev, price: e.target.value }))
-              }
+              onChange={(e) => {
+                const v = e.target.value;
+                setFormData((prev) => ({ ...prev, price: v }));
+                if (errors.price) setErrors((prev) => ({ ...prev, price: "" }));
+              }}
               placeholder="0"
               className={errors.price ? "border-red-500" : ""}
             />
@@ -174,7 +184,6 @@ export function ProductFormModal({
             )}
           </div>
 
-          {/* ✅ 생성 모드일 때만 qty 입력 보여주기 */}
           {!isEditMode && (
             <div>
               <Label htmlFor="qty">수량</Label>
@@ -182,9 +191,11 @@ export function ProductFormModal({
                 id="qty"
                 type="number"
                 value={formData.qty}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, qty: e.target.value }))
-                }
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setFormData((prev) => ({ ...prev, qty: v }));
+                  if (errors.qty) setErrors((prev) => ({ ...prev, qty: "" }));
+                }}
                 placeholder="0"
                 className={errors.qty ? "border-red-500" : ""}
               />
@@ -200,7 +211,7 @@ export function ProductFormModal({
             type="button"
             variant="outline"
             className="flex-1 bg-transparent"
-            onClick={onClose}
+            onClick={handleClose}
           >
             취소
           </Button>

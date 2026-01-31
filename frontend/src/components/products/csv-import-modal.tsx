@@ -18,6 +18,15 @@ function parseCsvHeader(text: string) {
   const firstLine = cleaned.split(/\r?\n/)[0] ?? "";
   return firstLine.split(",").map((s) => s.trim());
 }
+function getErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object" && "message" in e) {
+    const msg = (e as { message?: unknown }).message;
+    if (typeof msg === "string") return msg;
+  }
+  return "CSV 업로드 실패";
+}
 
 export function CsvImportModal({
   isOpen,
@@ -94,8 +103,8 @@ export function CsvImportModal({
       onImported();
       reset();
       onClose();
-    } catch (e: any) {
-      const msg = String(e?.message ?? "CSV 업로드 실패");
+    } catch (e: unknown) {
+      const msg = getErrorMessage(e);
 
       // ✅ 정책: 로그인/권한 문제여도 이동하지 않고 조용히 종료(원하면 메시지만)
       if (
@@ -103,7 +112,6 @@ export function CsvImportModal({
         msg.includes("403") ||
         msg.includes("AUTH_REQUIRED")
       ) {
-        // 아무 반응 없게 하려면 그냥 return;
         return;
       }
 
@@ -129,11 +137,13 @@ export function CsvImportModal({
       {/* modal */}
       <div className="absolute left-1/2 top-1/2 w-[520px] max-w-[calc(100vw-24px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-card border border-border shadow-lg">
         <div className="p-5 border-b border-border">
-          <h3 className="text-lg font-semibold text-foreground">CSV 가져오기</h3>
+          <h3 className="text-lg font-semibold text-foreground">
+            CSV 가져오기
+          </h3>
           <p className="text-sm text-muted-foreground mt-1">
             헤더는 반드시{" "}
-            <span className="font-medium">name, category, price, qty</span>{" "}
-            를 포함해야 합니다.
+            <span className="font-medium">name, category, price, qty</span> 를
+            포함해야 합니다.
           </p>
         </div>
 

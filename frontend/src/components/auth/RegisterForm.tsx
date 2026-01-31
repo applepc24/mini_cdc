@@ -4,6 +4,15 @@ import { useState, type FormEvent } from "react";
 import { Mail, Lock, User, Eye, EyeOff } from "lucide-react";
 import { apiPost } from "@/lib/api";
 
+function getErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object" && "message" in e) {
+    const msg = (e as { message?: unknown }).message;
+    if (typeof msg === "string") return msg;
+  }
+  return "회원가입 실패";
+}
 
 export const RegisterForm = ({
   onRegistered,
@@ -32,9 +41,9 @@ export const RegisterForm = ({
       });
 
       onRegistered?.(); // ✅ 성공하면 로그인 화면으로 전환
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err?.message ?? "회원가입 실패");
+      setError(getErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }

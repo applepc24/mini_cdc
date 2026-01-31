@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, type ReactNode } from 'react'
+import { useState, useRef, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { Sidebar } from './sidebar'
 import { Topbar } from './topbar'

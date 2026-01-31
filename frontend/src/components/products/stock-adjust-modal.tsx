@@ -1,8 +1,6 @@
 "use client";
 
-import React from "react";
-
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,16 +15,24 @@ interface StockAdjustModalProps {
   onClose: () => void;
   product: Product;
 
-  /**
-   * 기존에 부모가 쓰던 콜백이면 유지해도 됨.
-   * (성공 후에 한번 호출해줘서 부모 state 갱신/리패치에 쓰게 만들 수 있음)
-   */
   onAdjust?: (type: "in" | "out", quantity: number, note: string) => void;
-
-  /**
-   *  “API 결과로 돌아온 최신 product”로 화면 갱신하기 위한 콜백 (추천)
-   */
   onAdjusted?: (updated: Product) => void;
+}
+
+function getErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
+
+// product_id / id 둘 다 대응 (any 없이)
+function getProductId(product: Product): string | number {
+  const maybe = product as unknown as { product_id?: string | number; id?: string | number };
+  const id = maybe.product_id ?? maybe.id;
+
+  if (id == null) {
+    throw new Error("product_id 또는 id가 없습니다. Product 타입/데이터 확인 필요");
+  }
+  return id;
 }
 
 export function StockAdjustModal({
@@ -42,10 +48,9 @@ export function StockAdjustModal({
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // product.id / product.product_id 둘 중 뭐든 대응
-  const productId = (product as any).product_id ?? (product as any).id;
+  const productId = getProductId(product);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     const qty = Number(quantity);
 
@@ -63,29 +68,27 @@ export function StockAdjustModal({
       setIsSubmitting(true);
       setError("");
 
-      // 실제 API 호출
-      const updated = await apiPost<Product>(
-        `/products/${productId}/stock-adjust`,
-        {
-          type,
-          quantity: qty,
-          note: note?.trim() || null,
-        },
-      );
+      const updated = await apiPost<Product>(`/products/${productId}/stock-adjust`, {
+        type,
+        quantity: qty,
+        note: note.trim() ? note.trim() : null,
+      });
 
-      //부모가 state로 product 들고 있다면 여기서 갱신해주면 바로 화면 반영됨
+      // (옵션) 기존 콜백 유지
+      onAdjust?.(type, qty, note.trim());
+
+      // (추천) 최신 product로 부모 화면 갱신
       onAdjusted?.(updated);
 
       // 초기화 + 닫기
       setQuantity("");
       setNote("");
       onClose();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
 
-      const msg = String(err?.message ?? "");
+      const msg = getErrorMessage(err);
 
-      // ✅ 너의 정책: writer 요청(재고조정)은 로그인 필요 → 로그인으로 보냄
       if (msg === "AUTH_REQUIRED" || msg.includes("API Error 401")) {
         window.location.href = "/login";
         return;
@@ -98,16 +101,8 @@ export function StockAdjustModal({
   };
 
   const tabs = [
-    {
-      id: "in",
-      label: "입고",
-      icon: <ArrowDownToLine className="w-4 h-4" />,
-    },
-    {
-      id: "out",
-      label: "출고",
-      icon: <ArrowUpFromLine className="w-4 h-4" />,
-    },
+    { id: "in", label: "입고", icon: <ArrowDownToLine className="w-4 h-4" /> },
+    { id: "out", label: "출고", icon: <ArrowUpFromLine className="w-4 h-4" /> },
   ];
 
   return (
@@ -115,25 +110,21 @@ export function StockAdjustModal({
       <div className="space-y-4">
         <div className="text-center pb-4 border-b border-border">
           <p className="text-sm text-muted-foreground">현재 재고</p>
-          <p className="text-3xl font-semibold text-foreground">
-            {product.qty}
-          </p>
+          <p className="text-3xl font-semibold text-foreground">{product.qty}</p>
         </div>
 
         <TabsCustom
           tabs={tabs}
           activeTab={type}
           onChange={(id) => {
-            setType(id as "in" | "out");
+            setType(id === "out" ? "out" : "in");
             setError("");
           }}
         />
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <Label htmlFor="quantity">
-              {type === "in" ? "입고 수량" : "출고 수량"}
-            </Label>
+            <Label htmlFor="quantity">{type === "in" ? "입고 수량" : "출고 수량"}</Label>
             <Input
               id="quantity"
               type="number"
