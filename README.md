@@ -39,9 +39,8 @@
 > 확장 경로(선택): Outbox → Relay → (Kafka 같은 스트림) → Consumer
 
 ### CDC / Projection Pipeline (diagram)
-<!-- TODO: CDC 파이프라인 다이어그램 넣기 (Relay → Consumer → Projection) -->
- /mini_cdc.drawio.svg
-<!-- ![CDC Pipeline](docs/stackops-cdc-pipeline.png) -->
+
+![CDC / Projection Pipeline](./mini_cdc.drawio.svg)
 
 ### Outbox State Machine (diagram)
 <!-- TODO: Outbox 상태 머신 다이어그램 넣기 (NEW → PROCESSING → SENT / FAILED) -->
@@ -149,6 +148,7 @@
 ### 1) 전체 실행 (Docker Compose)
 ```bash
 docker compose up -d --build
+
 
 
 
