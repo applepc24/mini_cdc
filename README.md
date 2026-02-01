@@ -26,7 +26,7 @@
 
 ## Architecture
 
-![Architecture](docs/stackops-architecture.drawio.png)
+![Architecture](./docs/stackops.drawio.svg)
 
 ### Flow
 - Next.js UI → FastAPI(API)
@@ -40,7 +40,7 @@
 
 ### CDC / Projection Pipeline (diagram)
 
-![CDC / Projection Pipeline](./mini_cdc.drawio.svg)
+![CDC / Projection Pipeline](./docs/mini_cdc.drawio.svg)
 
 ## Key Features
 
@@ -141,6 +141,7 @@
 ### 1) 전체 실행 (Docker Compose)
 ```bash
 docker compose up -d --build
+
 
 
 
