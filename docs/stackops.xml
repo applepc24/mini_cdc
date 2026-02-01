@@ -1,0 +1,170 @@
+<mxfile host="app.diagrams.net" modified="2026-02-01T00:00:00.000Z" agent="ChatGPT" version="22.1.0" type="device">
+  <diagram id="stackops-arch" name="StackOps-Architecture">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- ===== Swimlanes / Groups ===== -->
+        <mxCell id="g_user" value="사용자 영역" style="swimlane;rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#adb5bd;" vertex="1" parent="1">
+          <mxGeometry x="20" y="40" width="220" height="820" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="g_fe" value="프론트엔드 (Next.js)" style="swimlane;rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#adb5bd;" vertex="1" parent="1">
+          <mxGeometry x="260" y="40" width="260" height="820" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="g_be" value="백엔드 (FastAPI)" style="swimlane;rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#adb5bd;" vertex="1" parent="1">
+          <mxGeometry x="540" y="40" width="420" height="820" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="g_db" value="데이터베이스 (PostgreSQL)" style="swimlane;rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#adb5bd;" vertex="1" parent="1">
+          <mxGeometry x="980" y="40" width="260" height="420" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="g_redis" value="Redis (Lock/Cache)" style="swimlane;rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#adb5bd;" vertex="1" parent="1">
+          <mxGeometry x="980" y="480" width="260" height="180" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="g_async" value="비동기 처리 (CDC / Projection)" style="swimlane;rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#adb5bd;" vertex="1" parent="1">
+          <mxGeometry x="1260" y="40" width="320" height="620" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="g_ext" value="외부 서비스" style="swimlane;rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#adb5bd;" vertex="1" parent="1">
+          <mxGeometry x="1260" y="680" width="320" height="180" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== Nodes ===== -->
+        <mxCell id="n_user" value="사용자&#10;(Browser)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c757d;" vertex="1" parent="g_user">
+          <mxGeometry x="40" y="80" width="140" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_web" value="Next.js Web App" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c757d;" vertex="1" parent="g_fe">
+          <mxGeometry x="40" y="80" width="180" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_router" value="API Router&#10;/ai/restock/agent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c757d;" vertex="1" parent="g_be">
+          <mxGeometry x="40" y="80" width="260" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_agent" value="RestockAgent&#10;(Orchestrator)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d4edda;strokeColor=#155724;strokeWidth=2;" vertex="1" parent="g_be">
+          <mxGeometry x="40" y="180" width="260" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_lock" value="Idempotency / Dedup" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c757d;" vertex="1" parent="g_be">
+          <mxGeometry x="40" y="290" width="260" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_svc" value="RestockService&#10;(추천/계산)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c757d;" vertex="1" parent="g_be">
+          <mxGeometry x="40" y="380" width="260" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_explain" value="LLM Explain&#10;(설명 생성)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c757d;" vertex="1" parent="g_be">
+          <mxGeometry x="40" y="480" width="260" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_db" value="Core Tables&#10;(products/sales/inventory...)" style="shape=cylinder;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c757d;" vertex="1" parent="g_db">
+          <mxGeometry x="30" y="100" width="200" height="90" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_outbox" value="Outbox Table" style="shape=cylinder;whiteSpace=wrap;html=1;fillColor=#fff3cd;strokeColor=#856404;strokeWidth=2;" vertex="1" parent="g_db">
+          <mxGeometry x="30" y="220" width="200" height="90" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_redis" value="Redis&#10;(Lock/Cache)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c757d;" vertex="1" parent="g_redis">
+          <mxGeometry x="30" y="60" width="200" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_relay" value="Relay (CDC)&#10;Outbox -&gt; MQ" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d1ecf1;strokeColor=#0c5460;strokeWidth=2;" vertex="1" parent="g_async">
+          <mxGeometry x="40" y="90" width="240" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_mq" value="Message Queue" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c757d;" vertex="1" parent="g_async">
+          <mxGeometry x="40" y="210" width="240" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_consumer" value="Consumer(s)&#10;Projection/Index Update" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c757d;" vertex="1" parent="g_async">
+          <mxGeometry x="40" y="320" width="240" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_proj" value="Read Model&#10;(Projection DB)" style="shape=cylinder;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c757d;" vertex="1" parent="g_async">
+          <mxGeometry x="40" y="430" width="240" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_search" value="Search Index" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c757d;" vertex="1" parent="g_async">
+          <mxGeometry x="40" y="530" width="240" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_llm" value="LLM Provider" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c757d;" vertex="1" parent="g_ext">
+          <mxGeometry x="60" y="70" width="200" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== Edges ===== -->
+        <mxCell id="e1" style="endArrow=block;html=1;strokeColor=#495057;" edge="1" parent="1" source="n_user" target="n_web">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e2" style="endArrow=block;html=1;strokeColor=#495057;" edge="1" parent="1" source="n_web" target="n_router">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e3" style="endArrow=block;html=1;strokeColor=#495057;" edge="1" parent="1" source="n_router" target="n_agent">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e4" value="중복 방지 키" style="endArrow=block;html=1;strokeColor=#495057;" edge="1" parent="1" source="n_agent" target="n_lock">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e5" value="SETNX/LOCK" style="endArrow=block;html=1;strokeColor=#495057;" edge="1" parent="1" source="n_lock" target="n_redis">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e6" value="추천 계산/조회" style="endArrow=block;html=1;strokeColor=#495057;" edge="1" parent="1" source="n_agent" target="n_svc">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e7" value="SELECT/UPDATE" style="endArrow=block;html=1;strokeColor=#495057;" edge="1" parent="1" source="n_svc" target="n_db">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e8" value="이벤트 기록" style="endArrow=block;html=1;strokeColor=#495057;" edge="1" parent="1" source="n_svc" target="n_outbox">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e9" value="설명 생성" style="endArrow=block;html=1;strokeColor=#495057;" edge="1" parent="1" source="n_agent" target="n_explain">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e10" value="prompt" style="endArrow=block;html=1;strokeColor=#495057;" edge="1" parent="1" source="n_explain" target="n_llm">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e11" value="poll/stream" style="endArrow=block;html=1;strokeColor=#495057;" edge="1" parent="1" source="n_outbox" target="n_relay">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e12" style="endArrow=block;html=1;strokeColor=#495057;" edge="1" parent="1" source="n_relay" target="n_mq">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e13" style="endArrow=block;html=1;strokeColor=#495057;" edge="1" parent="1" source="n_mq" target="n_consumer">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e14" value="update read model" style="endArrow=block;html=1;strokeColor=#495057;" edge="1" parent="1" source="n_consumer" target="n_proj">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e15" value="update index" style="endArrow=block;html=1;strokeColor=#495057;" edge="1" parent="1" source="n_consumer" target="n_search">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e16" value="optional writeback" style="endArrow=block;html=1;strokeColor=#495057;" edge="1" parent="1" source="n_consumer" target="n_db">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
