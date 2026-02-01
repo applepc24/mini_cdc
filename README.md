@@ -83,9 +83,8 @@
 - JWT Auth
 
 ### Data / Messaging
-- PostgreSQL (Write Model + Projection)
-- Redis (cache/aux)
-- (선택) Kafka 등 스트림으로 확장 가능
+- PostgreSQL (쓰기 모델 + 읽기 모델 일부)
+- Apache Kafka (데이터 스트리밍)
 
 ### Infra
 - Docker / Docker Compose
@@ -97,7 +96,7 @@
 ### ERD (diagram)
 <!-- TODO: ERD 이미지 넣기 -->
 <!-- 예: docs/stackops-erd.png -->
-<!-- ![ERD](docs/stackops-erd.png) -->
+![ERD](.docs/stackopsERD.svg)
 
 ### Tables (v1)
 - `users`: 사용자
@@ -141,6 +140,7 @@
 ### 1) 전체 실행 (Docker Compose)
 ```bash
 docker compose up -d --build
+
 
 
 
