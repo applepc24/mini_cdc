@@ -158,13 +158,3 @@ python scripts/init_db.py
 	2.	Docker Compose로 전체 서비스 실행
 
 docker compose up -d --build
-
-
-
-
-
-
-
-
-
-
