@@ -96,7 +96,7 @@
 ### ERD (diagram)
 <!-- TODO: ERD 이미지 넣기 -->
 <!-- 예: docs/stackops-erd.png -->
-![ERD](.docs/stackopsERD.svg)
+![ERD](./docs/stackopsERD.svg)
 
 ### Tables (v1)
 - `users`: 사용자
@@ -140,6 +140,7 @@
 ### 1) 전체 실행 (Docker Compose)
 ```bash
 docker compose up -d --build
+
 
 
 
