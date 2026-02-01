@@ -138,8 +138,27 @@
 ## Run Locally
 
 ### 1) 전체 실행 (Docker Compose)
+
 ```bash
 docker compose up -d --build
+모든 백엔드 서비스(API 서버, CDC Relay, Consumer 등)와
+인프라(PostgreSQL, Kafka 등)를 한 번에 실행합니다.
+
+# 가상 환경 활성화 (필요 시)
+# source .venv/bin/activate 
+
+# requirements.txt 파일에 명시된 라이브러리 설치
+pip install -r requirements.txt
+
+# 데이터베이스 초기화 스크립트 실행
+python scripts/init_db.py
+
+실행 순서 요약
+	1.	(선택) 로컬 PostgreSQL을 직접 사용할 경우 → DB 초기화
+	2.	Docker Compose로 전체 서비스 실행
+
+docker compose up -d --build
+
 
 
 
