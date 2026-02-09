@@ -78,4 +78,4 @@ pnpm-debug.log*
 # -------------------------
 # Docker runtime (optional)
 # -------------------------
-**/docker-data/
+**/docker-data/mini_cdc_local.dump
