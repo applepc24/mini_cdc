@@ -150,6 +150,8 @@ class User(Base):
         server_onupdate=text("CURRENT_TIMESTAMP"),
         nullable=False,
     )
+    slack_webhook_url = Column(Text, nullable=True)
+    slack_oauth_state = Column(Text, nullable=True)
 
 
 class InventoryEvent(Base):
@@ -204,3 +206,85 @@ class RestockIdempotency(Base):
     __table_args__ = (
         UniqueConstraint("owner_id", "idem_key", "endpoint", name="ux_restock_idem"),
     )
+
+
+class CsvUpload(Base):
+    __tablename__ = "csv_uploads"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    owner_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+
+    file_name: Mapped[str] = mapped_column(Text, nullable=False)
+    file_sha256: Mapped[Optional[str]] = mapped_column(Text)
+
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="UPLOADED")
+    total_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    valid_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    invalid_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    requested_by: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("users.id"))
+    approved_by: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("users.id"))
+    reject_reason: Mapped[Optional[str]] = mapped_column(Text)
+
+    created_at: Mapped[Optional[DateTime]] = mapped_column(
+        TIMESTAMP(timezone=False), server_default=func.now()
+    )
+    updated_at: Mapped[Optional[DateTime]] = mapped_column(
+        TIMESTAMP(timezone=False), server_default=func.now()
+    )
+
+    items: Mapped[List["CsvUploadItem"]] = relationship(
+        "CsvUploadItem",
+        back_populates="upload",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class CsvUploadItem(Base):
+    __tablename__ = "csv_upload_items"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    upload_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("csv_uploads.id", ondelete="CASCADE"), nullable=False
+    )
+
+    owner_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    product_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    before_qty: Mapped[Optional[int]] = mapped_column(Integer)
+    after_qty: Mapped[Optional[int]] = mapped_column(Integer)
+    delta_qty: Mapped[Optional[int]] = mapped_column(Integer)
+
+    issue_code: Mapped[str] = mapped_column(Text, nullable=False, default="OK")
+    issue_msg: Mapped[Optional[str]] = mapped_column(Text)
+
+    created_at: Mapped[Optional[DateTime]] = mapped_column(
+        TIMESTAMP(timezone=False), server_default=func.now()
+    )
+
+    upload: Mapped["CsvUpload"] = relationship("CsvUpload", back_populates="items")
+
+
+class SlackSettings(Base):
+    __tablename__ = "slack_settings"
+
+    id = Column(BigInteger, primary_key=True)
+    owner_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+
+    webhook_url = Column(Text, nullable=False)
+
+    is_enabled = Column(Boolean, nullable=False, server_default="true")
+    channel_name = Column(Text, nullable=True)
+
+    notify_on_import = Column(Boolean, nullable=False, server_default="true")
+    notify_failures = Column(Boolean, nullable=False, server_default="true")
+    notify_zero_stock = Column(Boolean, nullable=False, server_default="true")
+    zero_stock_threshold = Column(Integer, nullable=False, server_default="1")
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

@@ -1,0 +1,37 @@
+[INFO] PRODUCT_ID=26 OWNER_ID=6 EMAIL=recovery@example.com
+[CHECK] backlog before restart:
+0|6041||
+
+[ACTION] starting consumer...
+[MEASURE] waiting backlog -> 0 ...
+t=1770ms outbox_new=0 max_id=6041 applied_id= pending=
+t=2295ms outbox_new=0 max_id=6041 applied_id= pending=
+t=2827ms outbox_new=0 max_id=6041 applied_id= pending=
+t=3539ms outbox_new=0 max_id=6041 applied_id= pending=
+t=4102ms outbox_new=0 max_id=6041 applied_id= pending=
+t=4660ms outbox_new=0 max_id=6041 applied_id= pending=
+t=5241ms outbox_new=0 max_id=6041 applied_id= pending=
+t=5914ms outbox_new=0 max_id=6041 applied_id= pending=
+t=6629ms outbox_new=0 max_id=6041 applied_id= pending=
+t=7223ms outbox_new=0 max_id=6041 applied_id=1191 pending=4850
+t=7786ms outbox_new=0 max_id=6041 applied_id=1535 pending=4506
+t=8316ms outbox_new=0 max_id=6041 applied_id=1904 pending=4137
+t=8967ms outbox_new=0 max_id=6041 applied_id=2135 pending=3906
+t=9582ms outbox_new=0 max_id=6041 applied_id=2390 pending=3651
+t=10425ms outbox_new=0 max_id=6041 applied_id=2643 pending=3398
+t=11125ms outbox_new=0 max_id=6041 applied_id=2861 pending=3180
+t=11791ms outbox_new=0 max_id=6041 applied_id=3060 pending=2981
+t=12412ms outbox_new=0 max_id=6041 applied_id=3228 pending=2813
+t=13052ms outbox_new=0 max_id=6041 applied_id=3486 pending=2555
+t=13677ms outbox_new=0 max_id=6041 applied_id=3762 pending=2279
+t=14526ms outbox_new=0 max_id=6041 applied_id=4006 pending=2035
+t=15232ms outbox_new=0 max_id=6041 applied_id=4250 pending=1791
+t=15903ms outbox_new=0 max_id=6041 applied_id=4485 pending=1556
+t=16483ms outbox_new=0 max_id=6041 applied_id=4750 pending=1291
+t=17044ms outbox_new=0 max_id=6041 applied_id=5122 pending=919
+t=17674ms outbox_new=0 max_id=6041 applied_id=5413 pending=628
+t=18446ms outbox_new=0 max_id=6041 applied_id=5614 pending=427
+t=19272ms outbox_new=0 max_id=6041 applied_id=5734 pending=307
+t=19869ms outbox_new=0 max_id=6041 applied_id=5872 pending=169
+t=20527ms outbox_new=0 max_id=6041 applied_id=6041 pending=0
+[DONE] MTTR=20527ms

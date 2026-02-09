@@ -1,10 +1,22 @@
 // src/lib/api.ts
+import type { CsvUploadDetailOut, CsvUploadOut } from "@/lib/types";
+
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 export function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("accessToken");
+}
+
+export function setAccessToken(token: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem("accessToken", token);
+}
+
+export function clearAccessToken() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem("accessToken");
 }
 
 function normalizePath(path: string) {
@@ -17,6 +29,11 @@ function isAiPath(path: string) {
   return p.startsWith("/ai/");
 }
 
+function isCsvUploadsPath(path: string) {
+  const p = normalizePath(path);
+  return p.startsWith("/csv-uploads");
+}
+
 // ✅ 읽기 요청(= read model)은 토큰 유무에 따라 /public vs /search로
 function scopeRead(path: string) {
   const p = normalizePath(path);
@@ -24,10 +41,14 @@ function scopeRead(path: string) {
   return `${token ? "/search" : "/public"}${p}`;
 }
 
-// ✅ writer 요청은 /products (토큰 필수)
+// ✅ writer 요청은 토큰 필수(우리는 csv-uploads도 로그인 필수로 막을 거라 여기에 포함)
 function isWriterPath(path: string) {
   const p = normalizePath(path);
-  return p.startsWith("/products") || p.startsWith("/ai/");
+  return (
+    p.startsWith("/products") ||
+    p.startsWith("/ai/") ||
+    p.startsWith("/csv-uploads")
+  );
 }
 
 function resolvePath(path: string, method: string) {
@@ -36,6 +57,10 @@ function resolvePath(path: string, method: string) {
   // auth/health는 항상 그대로
   if (p.startsWith("/auth") || p === "/health") return p;
 
+  // ✅ csv-uploads는 prefix 붙이면 안 됨 (항상 그대로)
+  if (p.startsWith("/csv-uploads")) return p;
+
+  // ai는 그대로
   if (p.startsWith("/ai/")) return p;
 
   // 이미 prefix가 붙어있으면 그대로
@@ -58,23 +83,28 @@ function isFormDataBody(body: unknown): body is FormData {
   return typeof FormData !== "undefined" && body instanceof FormData;
 }
 
-// function isPlainObjectBody(body: unknown): body is Record<string, unknown> {
-//   return typeof body === "object" && body !== null && !Array.isArray(body);
-// }
-
 function isStringBody(body: unknown): body is string {
   return typeof body === "string";
 }
 
-async function request<T>(path: string, init: RequestInitWithBody = {}): Promise<T> {
+async function request<T>(
+  path: string,
+  init: RequestInitWithBody = {},
+): Promise<T> {
   const method = (init.method ?? "GET").toUpperCase();
   const token = getAccessToken();
 
-  // ✅ writer인데 토큰 없으면 프론트에서 바로 막기 (서버 로그도 깨끗해짐)
+  // ✅ writer인데 토큰 없으면 프론트에서 바로 막기 (서버 로그도 깨끗)
   if (method !== "GET" && isWriterPath(path) && !token) {
     throw new Error("AUTH_REQUIRED");
   }
 
+  // ✅ csv-uploads는 GET이어도 로그인 필수
+  if (isCsvUploadsPath(path) && !token) {
+    throw new Error("AUTH_REQUIRED");
+  }
+
+  // ✅ ai는 항상 로그인 필요
   if (isAiPath(path) && !token) {
     throw new Error("AUTH_REQUIRED");
   }
@@ -132,7 +162,6 @@ async function request<T>(path: string, init: RequestInitWithBody = {}): Promise
 
   const contentType = res.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {
-    // json 아닌 응답도 받을 수 있게(필요하면)
     const text = await res.text().catch(() => "");
     return text as unknown as T;
   }
@@ -144,7 +173,6 @@ export function apiGet<T>(path: string) {
   return request<T>(path, { method: "GET" });
 }
 
-// ✅ any 제거: unknown 사용 (request에서 stringify/처리)
 export function apiPost<T>(path: string, body: unknown) {
   return request<T>(path, { method: "POST", body });
 }
@@ -157,20 +185,10 @@ export function apiDelete<T>(path: string) {
   return request<T>(path, { method: "DELETE" });
 }
 
-export function setAccessToken(token: string) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem("accessToken", token);
-}
-
-export function clearAccessToken() {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem("accessToken");
-}
-
 /**
  * ✅ apiUpload는 유지해도 되고,
- * 이제는 그냥 apiPost("/products/import", formData)로도 업로드 가능해짐.
- * (하지만 apiUpload는 url을 absolute로 쓰는 경우 편해서 남겨둬도 OK)
+ * 이제는 그냥 apiPost("/products/import", formData)로도 업로드 가능.
+ * (다만 "절대 URL"이 필요할 때 편해서 남겨둬도 OK)
  */
 export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
   const base = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
@@ -195,4 +213,17 @@ export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
   }
 
   return (await res.json()) as T;
+}
+
+// =======================
+// CSV Uploads APIs
+// =======================
+export function fetchCsvUploads(limit = 20, offset = 0) {
+  return apiGet<CsvUploadOut[]>(`/csv-uploads?limit=${limit}&offset=${offset}`);
+}
+
+export function fetchCsvUploadDetail(uploadId: number, limit = 200, offset = 0) {
+  return apiGet<CsvUploadDetailOut>(
+    `/csv-uploads/${uploadId}?limit=${limit}&offset=${offset}`,
+  );
 }

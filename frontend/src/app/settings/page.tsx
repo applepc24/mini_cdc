@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Save, Moon, Sun, Monitor } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -11,6 +11,7 @@ import { useSettings } from "@/hooks/use-settings";
 import { useTheme } from "@/hooks/use-theme";
 import { useAppToast } from "@/hooks/use-app-toast";
 import { cn } from "@/lib/utils";
+import { SlackSettingsCard } from "@/components/settings/SlackSettingsCard";
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -25,24 +26,46 @@ const itemVariants = {
   visible: { opacity: 1, y: 0 },
 };
 
+type DraftSettings = {
+  threshold: number;
+  itemsPerPage: number;
+};
+
 export default function SettingsPage() {
   const { settings, updateSettings } = useSettings();
   const { theme, setTheme } = useTheme();
   const { addToast } = useAppToast();
 
-  const [localSettings, setLocalSettings] = useState(() => ({
-    threshold: settings.threshold,
-    itemsPerPage: settings.itemsPerPage,
-  }));
+  // ✅ hydration mismatch 방지: mounted 이후에만 theme 기반 UI를 확정
+  const [mounted, setMounted] = useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => setMounted(true), []);
+
+  // ✅ settings를 "복사"하지 않고, 사용자 입력이 생길 때만 draft를 만든다
+  const [draft, setDraft] = useState<DraftSettings | null>(null);
+
+  // 화면에 보여줄 값: draft가 있으면 draft, 없으면 서버/스토어 settings
+  const view = useMemo(
+    () => ({
+      threshold: draft?.threshold ?? settings.threshold,
+      itemsPerPage: draft?.itemsPerPage ?? settings.itemsPerPage,
+    }),
+    [draft, settings.threshold, settings.itemsPerPage],
+  );
+
+  const hasChanges =
+    view.threshold !== settings.threshold ||
+    view.itemsPerPage !== settings.itemsPerPage;
 
   const handleSave = () => {
-    updateSettings(localSettings);
+    updateSettings(view);
+    setDraft(null);
     addToast("success", "설정이 저장되었습니다");
   };
 
-  const hasChanges =
-    localSettings.threshold !== settings.threshold ||
-    localSettings.itemsPerPage !== settings.itemsPerPage;
+  const handleReset = () => {
+    setDraft(null);
+  };
 
   const themeOptions = [
     { value: "light", label: "라이트", icon: Sun },
@@ -77,39 +100,57 @@ export default function SettingsPage() {
           <div className="space-y-4">
             <div>
               <Label className="mb-3 block">테마</Label>
-              <div className="grid grid-cols-3 gap-3">
-                {themeOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    onClick={() => setTheme(option.value)}
-                    className={cn(
-                      "flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all",
-                      theme === option.value
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-muted-foreground/50",
-                    )}
-                  >
-                    <option.icon
+
+              {/* ✅ mounted 전엔 SSR/CSR mismatch 유발 가능 → placeholder */}
+              {!mounted ? (
+                <div className="grid grid-cols-3 gap-3">
+                  {themeOptions.map((option) => (
+                    <div
+                      key={option.value}
+                      className="flex flex-col items-center gap-2 p-4 rounded-lg border-2 border-border opacity-60"
+                    >
+                      <option.icon className="w-6 h-6 text-muted-foreground" />
+                      <span className="text-sm font-medium text-foreground">
+                        {option.label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-3">
+                  {themeOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => setTheme(option.value)}
                       className={cn(
-                        "w-6 h-6",
+                        "flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all",
                         theme === option.value
-                          ? "text-primary"
-                          : "text-muted-foreground",
-                      )}
-                    />
-                    <span
-                      className={cn(
-                        "text-sm font-medium",
-                        theme === option.value
-                          ? "text-primary"
-                          : "text-foreground",
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-muted-foreground/50",
                       )}
                     >
-                      {option.label}
-                    </span>
-                  </button>
-                ))}
-              </div>
+                      <option.icon
+                        className={cn(
+                          "w-6 h-6",
+                          theme === option.value
+                            ? "text-primary"
+                            : "text-muted-foreground",
+                        )}
+                      />
+                      <span
+                        className={cn(
+                          "text-sm font-medium",
+                          theme === option.value
+                            ? "text-primary"
+                            : "text-foreground",
+                        )}
+                      >
+                        {option.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </motion.div>
@@ -134,13 +175,14 @@ export default function SettingsPage() {
                   type="range"
                   min="1"
                   max="100"
-                  value={localSettings.threshold}
-                  onChange={(e) =>
-                    setLocalSettings((prev) => ({
-                      ...prev,
-                      threshold: Number(e.target.value),
-                    }))
-                  }
+                  value={view.threshold}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setDraft((prev) => ({
+                      threshold: v,
+                      itemsPerPage: prev?.itemsPerPage ?? settings.itemsPerPage,
+                    }));
+                  }}
                   className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
                 />
                 <Input
@@ -148,13 +190,14 @@ export default function SettingsPage() {
                   type="number"
                   min="1"
                   max="100"
-                  value={localSettings.threshold}
-                  onChange={(e) =>
-                    setLocalSettings((prev) => ({
-                      ...prev,
-                      threshold: Number(e.target.value),
-                    }))
-                  }
+                  value={view.threshold}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setDraft((prev) => ({
+                      threshold: v,
+                      itemsPerPage: prev?.itemsPerPage ?? settings.itemsPerPage,
+                    }));
+                  }}
                   className="w-20"
                 />
               </div>
@@ -169,15 +212,15 @@ export default function SettingsPage() {
                 {itemsPerPageOptions.map((option) => (
                   <button
                     key={option}
-                    onClick={() =>
-                      setLocalSettings((prev) => ({
-                        ...prev,
+                    onClick={() => {
+                      setDraft((prev) => ({
+                        threshold: prev?.threshold ?? settings.threshold,
                         itemsPerPage: option,
-                      }))
-                    }
+                      }));
+                    }}
                     className={cn(
                       "px-4 py-2 rounded-lg border transition-all",
-                      localSettings.itemsPerPage === option
+                      view.itemsPerPage === option
                         ? "border-primary bg-primary text-primary-foreground"
                         : "border-border hover:border-muted-foreground/50 text-foreground",
                     )}
@@ -189,6 +232,9 @@ export default function SettingsPage() {
             </div>
           </div>
         </motion.div>
+
+        {/* Slack Settings */}
+        <SlackSettingsCard itemVariants={itemVariants} />
 
         {/* Keyboard Shortcuts */}
         <motion.div
@@ -244,7 +290,7 @@ export default function SettingsPage() {
         </motion.div>
 
         {/* Save Button */}
-        <motion.div variants={itemVariants} className="flex justify-end">
+        <motion.div variants={itemVariants} className="flex justify-end gap-2">
           <Button onClick={handleSave} disabled={!hasChanges}>
             <Save className="w-4 h-4 mr-2" />
             변경사항 저장
@@ -252,12 +298,7 @@ export default function SettingsPage() {
           <Button
             type="button"
             variant="secondary"
-            onClick={() =>
-              setLocalSettings({
-                threshold: settings.threshold,
-                itemsPerPage: settings.itemsPerPage,
-              })
-            }
+            onClick={handleReset}
             disabled={!hasChanges}
           >
             되돌리기

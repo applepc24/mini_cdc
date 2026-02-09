@@ -9,13 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ProductFilters } from "@/components/products/product-filters";
 import { ProductTable } from "@/components/products/product-table";
 import { ProductFormModal } from "@/components/products/product-form-modal";
-import {
-  apiGet,
-  apiPost,
-  apiPut,
-  apiDelete,
-  getAccessToken,
-} from "@/lib/api";
+import { apiGet, apiPost, apiPut, apiDelete, getAccessToken } from "@/lib/api";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useSettings } from "@/hooks/use-settings";
 import { useAppToast } from "@/hooks/use-app-toast";
@@ -60,7 +54,12 @@ function getErrorMessage(e: unknown): string {
 }
 
 // ✅ mock 정렬: any 없이 key별 비교
-function compareProducts(a: Product, b: Product, sortBy: string, sortOrder: "asc" | "desc") {
+function compareProducts(
+  a: Product,
+  b: Product,
+  sortBy: string,
+  sortOrder: "asc" | "desc",
+) {
   const dir = sortOrder === "asc" ? 1 : -1;
 
   switch (sortBy) {
@@ -100,6 +99,9 @@ export default function ProductsPage() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [showCsvModal, setShowCsvModal] = useState(false);
 
+  // ✅ 추가: URL 쿼리 upload_id (특정 업로드에 포함된 제품만 보기)
+  const [uploadId, setUploadId] = useState<number | null>(null);
+
   const debouncedSearch = useDebounce(filters.search, 300);
 
   useEffect(() => {
@@ -108,6 +110,14 @@ export default function ProductsPage() {
 
     const newProduct = searchParams.get("new");
     if (newProduct === "true") setShowProductModal(true);
+
+    // ✅ upload_id 쿼리 파싱
+    const u = searchParams.get("upload_id");
+    const parsed = u ? Number(u) : NaN;
+    setUploadId(Number.isFinite(parsed) && parsed > 0 ? parsed : null);
+
+    // ✅ upload_id 바뀌면 1페이지로
+    setCurrentPage(1);
   }, [searchParams]);
 
   // Keyboard shortcut for new product
@@ -125,7 +135,7 @@ export default function ProductsPage() {
 
     const token = getAccessToken();
 
-    // ✅ 비로그인: mock 모드
+    // ✅ 비로그인: mock 모드 (upload_id는 의미 없으니 무시)
     if (!token) {
       const filtered = mockProducts
         .filter((p) => {
@@ -138,8 +148,12 @@ export default function ProductsPage() {
             ? p.category === filters.category
             : true,
         )
-        .filter((p) => (filters.minQty ? p.qty >= Number(filters.minQty) : true))
-        .filter((p) => (filters.maxQty ? p.qty <= Number(filters.maxQty) : true))
+        .filter((p) =>
+          filters.minQty ? p.qty >= Number(filters.minQty) : true,
+        )
+        .filter((p) =>
+          filters.maxQty ? p.qty <= Number(filters.maxQty) : true,
+        )
         .filter((p) =>
           filters.minPrice ? p.price >= Number(filters.minPrice) : true,
         )
@@ -174,12 +188,16 @@ export default function ProductsPage() {
       if (filters.minPrice) params.set("minPrice", filters.minPrice);
       if (filters.maxPrice) params.set("maxPrice", filters.maxPrice);
 
+      // ✅ upload_id 필터 추가
+      if (uploadId) params.set("upload_id", String(uploadId));
+
       params.set("limit", String(settings.itemsPerPage));
       params.set("offset", String((currentPage - 1) * settings.itemsPerPage));
 
       params.set("sortBy", filters.sortBy);
       params.set("sortOrder", filters.sortOrder);
 
+      // (너 프로젝트 구조 유지)
       params.set("owner_id", String(PUBLIC_OWNER_ID));
 
       const res = await apiGet<{ count: number; items: Product[] }>(
@@ -212,6 +230,7 @@ export default function ProductsPage() {
     filters.sortOrder,
     currentPage,
     settings.itemsPerPage,
+    uploadId, // ✅ deps 추가
     addToast,
   ]);
 
@@ -221,7 +240,12 @@ export default function ProductsPage() {
     fetchProducts();
   }, [fetchProducts]);
 
-  const handleSubmitProduct = async (data: { name: string; category: string; price: number; qty?: number }) => {
+  const handleSubmitProduct = async (data: {
+    name: string;
+    category: string;
+    price: number;
+    qty?: number;
+  }) => {
     try {
       if (editingProduct) {
         await apiPut<Product>(`/products/${editingProduct.product_id}`, {
@@ -313,6 +337,24 @@ export default function ProductsPage() {
             </div>
           </div>
 
+          {/* ✅ 업로드 필터 배너 */}
+          {uploadId && (
+            <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 flex items-center justify-between">
+              <div className="text-sm text-foreground">
+                현재 CSV 업로드 <b>#{uploadId}</b> 기준으로 필터링 중
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  // 전체 보기: upload_id 제거
+                  window.location.href = "/products";
+                }}
+              >
+                전체 보기
+              </Button>
+            </div>
+          )}
+
           {/* Filters */}
           <ProductFilters
             filters={filters}
@@ -368,7 +410,8 @@ export default function ProductsPage() {
                     let pageNum: number;
                     if (totalPages <= 5) pageNum = i + 1;
                     else if (currentPage <= 3) pageNum = i + 1;
-                    else if (currentPage >= totalPages - 2) pageNum = totalPages - 4 + i;
+                    else if (currentPage >= totalPages - 2)
+                      pageNum = totalPages - 4 + i;
                     else pageNum = currentPage - 2 + i;
 
                     return (
@@ -387,7 +430,9 @@ export default function ProductsPage() {
                 <Button
                   variant="outline"
                   size="icon"
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  onClick={() =>
+                    setCurrentPage((p) => Math.min(totalPages, p + 1))
+                  }
                   disabled={currentPage === totalPages}
                 >
                   <ChevronRight className="w-4 h-4" />
@@ -419,7 +464,9 @@ export default function ProductsPage() {
           product={selectedProduct}
           onAdjusted={(updated) => {
             setProducts((prev) =>
-              prev.map((p) => (p.product_id === updated.product_id ? updated : p)),
+              prev.map((p) =>
+                p.product_id === updated.product_id ? updated : p,
+              ),
             );
             addToast("success", "재고 조정 완료");
             setShowStockModal(false);
@@ -431,9 +478,12 @@ export default function ProductsPage() {
       <CsvImportModal
         isOpen={showCsvModal}
         onClose={() => setShowCsvModal(false)}
-        onImported={async () => {
-          addToast("success", "CSV 업로드 완료");
-          setShowCsvModal(false);
+        onImported={async (res) => {
+          addToast(
+            res.failed > 0 ? "warning" : "success",
+            `CSV 완료: 반영 ${res.inserted}, 스킵 ${res.skipped}, 실패 ${res.failed}`,
+          );
+
           setCurrentPage(1);
           await fetchProducts();
         }}

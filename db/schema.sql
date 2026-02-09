@@ -490,3 +490,172 @@ ALTER TABLE ONLY public.stocks
 
 \unrestrict 56JMA9veyCDOzBV5AttXJGnYRLlxMZiGdSRNbUt9povmiiXaYQNA62CLdR4DIOg
 
+--
+-- Name: csv_uploads; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.csv_uploads (
+    id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    file_name text NOT NULL,
+    file_sha256 text,
+    status text DEFAULT 'UPLOADED'::text NOT NULL,
+    total_rows integer DEFAULT 0 NOT NULL,
+    valid_rows integer DEFAULT 0 NOT NULL,
+    invalid_rows integer DEFAULT 0 NOT NULL,
+    requested_by bigint,
+    approved_by bigint,
+    reject_reason text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+--
+-- Name: csv_uploads_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.csv_uploads_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: csv_uploads_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.csv_uploads_id_seq OWNED BY public.csv_uploads.id;
+
+--
+-- Name: csv_uploads id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_uploads
+    ALTER COLUMN id SET DEFAULT nextval('public.csv_uploads_id_seq'::regclass);
+
+--
+-- Name: csv_uploads csv_uploads_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_uploads
+    ADD CONSTRAINT csv_uploads_pkey PRIMARY KEY (id);
+
+--
+-- Name: csv_upload_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.csv_upload_items (
+    id bigint NOT NULL,
+    upload_id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    product_id bigint NOT NULL,
+    before_qty integer,
+    after_qty integer,
+    delta_qty integer,
+    issue_code text DEFAULT 'OK'::text NOT NULL,
+    issue_msg text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+--
+-- Name: csv_upload_items_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.csv_upload_items_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: csv_upload_items_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.csv_upload_items_id_seq OWNED BY public.csv_upload_items.id;
+
+--
+-- Name: csv_upload_items id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_upload_items
+    ALTER COLUMN id SET DEFAULT nextval('public.csv_upload_items_id_seq'::regclass);
+
+--
+-- Name: csv_upload_items csv_upload_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_upload_items
+    ADD CONSTRAINT csv_upload_items_pkey PRIMARY KEY (id);
+
+--
+-- Name: ix_csv_uploads_owner_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_csv_uploads_owner_created ON public.csv_uploads USING btree (owner_id, created_at DESC);
+
+--
+-- Name: ix_csv_uploads_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_csv_uploads_status ON public.csv_uploads USING btree (status);
+
+--
+-- Name: ix_csv_upload_items_upload; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_csv_upload_items_upload ON public.csv_upload_items USING btree (upload_id);
+
+--
+-- Name: ix_csv_upload_items_upload_issue; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_csv_upload_items_upload_issue ON public.csv_upload_items USING btree (upload_id, issue_code);
+
+--
+-- Name: ix_csv_upload_items_owner_product; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_csv_upload_items_owner_product ON public.csv_upload_items USING btree (owner_id, product_id);
+
+--
+-- Name: csv_uploads csv_uploads_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_uploads
+    ADD CONSTRAINT csv_uploads_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+--
+-- Name: csv_uploads csv_uploads_requested_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_uploads
+    ADD CONSTRAINT csv_uploads_requested_by_fkey FOREIGN KEY (requested_by) REFERENCES public.users(id);
+
+--
+-- Name: csv_uploads csv_uploads_approved_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_uploads
+    ADD CONSTRAINT csv_uploads_approved_by_fkey FOREIGN KEY (approved_by) REFERENCES public.users(id);
+
+--
+-- Name: csv_upload_items csv_upload_items_upload_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_upload_items
+    ADD CONSTRAINT csv_upload_items_upload_id_fkey FOREIGN KEY (upload_id) REFERENCES public.csv_uploads(id) ON DELETE CASCADE;
+
+--
+-- Name: csv_upload_items csv_upload_items_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_upload_items
+    ADD CONSTRAINT csv_upload_items_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+--
+-- (선택) product_id는 products에 FK 걸 수도 있는데,
+-- CSV에 "없는 product_id"도 diff에 담고 싶으면 FK는 안 거는 게 안전함.
+-- 그래서 product_id FK는 MVP에서는 생략!
+--

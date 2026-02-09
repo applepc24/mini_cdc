@@ -16,6 +16,8 @@ def search_products(
     sortOrder: Literal["asc", "desc"] = "desc",
     limit: int = 50,
     offset: int = 0,
+    # ✅ 추가: 특정 CSV 업로드에 포함된 product만 보기
+    upload_id: Optional[int] = None,
 ):
     conditions = ["owner_id = :owner_id", "is_deleted = false"]
     params = {"owner_id": owner_id, "limit": limit, "offset": offset}
@@ -43,6 +45,22 @@ def search_products(
     if maxPrice is not None:
         conditions.append("price <= :maxPrice")
         params["maxPrice"] = maxPrice
+
+    # ✅ 핵심: upload_id 필터 (CsvUploadItem에 기록된 product_id 집합으로 제한)
+    # - owner_id도 같이 걸어야 안전
+    # - DISTINCT는 중복 제거
+    if upload_id is not None:
+        conditions.append(
+            """
+            product_id IN (
+                SELECT DISTINCT product_id
+                FROM csv_upload_items
+                WHERE owner_id = :owner_id
+                  AND upload_id = :upload_id
+            )
+            """.strip()
+        )
+        params["upload_id"] = upload_id
 
     where_clause = "WHERE " + " AND ".join(conditions)
 
@@ -86,5 +104,7 @@ def get_product_detail(db: Session, owner_id: int, product_id: int):
           AND product_id = :product_id
           AND is_deleted = false
     """)
-    row = db.execute(sql, {"owner_id": owner_id, "product_id": product_id}).mappings().first()
+    row = db.execute(
+        sql, {"owner_id": owner_id, "product_id": product_id}
+    ).mappings().first()
     return row

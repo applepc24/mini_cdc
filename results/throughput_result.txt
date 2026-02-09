@@ -1,0 +1,28 @@
+[OK] got TOKEN (len=141)
+[OK] created product_id=27
+[OK] owner_id=7
+[OK] start_outbox_id=6042
+[LOAD] sending 5000 stock-adjust requests (consumer ON)...
+  sent 500/5000
+  sent 1000/5000
+  sent 1500/5000
+  sent 2000/5000
+  sent 2500/5000
+  sent 3000/5000
+  sent 3500/5000
+  sent 4000/5000
+  sent 4500/5000
+  sent 5000/5000
+[DONE] load sent. send_elapsed=122659ms
+[WAIT] waiting until outbox backlog converges to 0...
+  not_sent=32 (NEW=0)
+
+================ RESULT ================
+N=5000
+send_elapsed_ms=122659
+converge_elapsed_ms=124014  (from first request -> backlog 0)
+post_send_converge_ms=1355 (after load sent -> backlog 0)
+throughput_ev_per_sec=40.32
+========================================
+
+[INFO] product_id=27 owner_id=7 email=throughput@example.com

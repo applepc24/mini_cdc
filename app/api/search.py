@@ -48,6 +48,7 @@ def get_search_products(
     sortOrder: Literal["asc", "desc"] = Query("desc"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    upload_id: int | None = Query(None, ge=1),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -63,6 +64,19 @@ def get_search_products(
             minPrice=minPrice,
             maxPrice=maxPrice,
         )
+        if upload_id is not None:
+            pid_rows = db.execute(
+                text("""
+                    SELECT DISTINCT product_id
+                    FROM csv_upload_items
+                    WHERE owner_id = :owner_id
+                      AND upload_id = :upload_id
+                """),
+                {"owner_id": current_user.id, "upload_id": upload_id},
+            ).all()
+            allowed = {r[0] for r in pid_rows}
+            items = [x for x in items if x.get("product_id") in allowed]
+
         return {"count": len(items), "items": items}
 
     total, items = search_products(
@@ -78,6 +92,7 @@ def get_search_products(
         sortOrder=sortOrder,
         limit=limit,
         offset=offset,
+        upload_id=upload_id,
     )
     safe_items = []
     for p in items:
