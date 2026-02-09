@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict 56JMA9veyCDOzBV5AttXJGnYRLlxMZiGdSRNbUt9povmiiXaYQNA62CLdR4DIOg
+\restrict FkgvRcBVSA2wdErpIlcI4XOZx75MyhjQjtclMqgYDyh2Lwy6l12MBq6LzfKHB0X
 
 -- Dumped from database version 16.11 (Debian 16.11-1.pgdg12+1)
 -- Dumped by pg_dump version 16.11 (Debian 16.11-1.pgdg12+1)
@@ -32,9 +32,100 @@ CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 COMMENT ON EXTENSION vector IS 'vector data type and ivfflat and hnsw access methods';
 
 
+--
+-- Name: set_updated_at(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.set_updated_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$;
+
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
+
+--
+-- Name: csv_upload_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.csv_upload_items (
+    id bigint NOT NULL,
+    upload_id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    product_id bigint NOT NULL,
+    before_qty integer,
+    after_qty integer,
+    delta_qty integer,
+    issue_code text DEFAULT 'OK'::text NOT NULL,
+    issue_msg text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: csv_upload_items_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.csv_upload_items_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: csv_upload_items_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.csv_upload_items_id_seq OWNED BY public.csv_upload_items.id;
+
+
+--
+-- Name: csv_uploads; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.csv_uploads (
+    id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    file_name text NOT NULL,
+    file_sha256 text,
+    status text DEFAULT 'UPLOADED'::text NOT NULL,
+    total_rows integer DEFAULT 0 NOT NULL,
+    valid_rows integer DEFAULT 0 NOT NULL,
+    invalid_rows integer DEFAULT 0 NOT NULL,
+    requested_by bigint,
+    approved_by bigint,
+    reject_reason text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: csv_uploads_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.csv_uploads_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: csv_uploads_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.csv_uploads_id_seq OWNED BY public.csv_uploads.id;
+
 
 --
 -- Name: inventory_events; Type: TABLE; Schema: public; Owner: -
@@ -125,7 +216,8 @@ CREATE TABLE public.product_search (
     embedding public.vector(1536),
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     is_deleted boolean DEFAULT false NOT NULL,
-    deleted_at timestamp with time zone
+    deleted_at timestamp with time zone,
+    last_outbox_id bigint
 );
 
 
@@ -185,6 +277,19 @@ ALTER SEQUENCE public.products_id_seq OWNED BY public.products.id;
 
 
 --
+-- Name: readmodel_apply_log; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.readmodel_apply_log (
+    outbox_id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    product_id bigint NOT NULL,
+    event_type character varying(50) NOT NULL,
+    applied_at timestamp without time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: restock_idempotency; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -221,6 +326,60 @@ ALTER SEQUENCE public.restock_idempotency_id_seq OWNED BY public.restock_idempot
 
 
 --
+-- Name: slack_installations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.slack_installations (
+    owner_id bigint NOT NULL,
+    team_id text NOT NULL,
+    team_name text,
+    bot_token text NOT NULL,
+    bot_user_id text,
+    installed_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: slack_settings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.slack_settings (
+    id bigint NOT NULL,
+    owner_id bigint NOT NULL,
+    webhook_url text NOT NULL,
+    is_enabled boolean DEFAULT true NOT NULL,
+    channel_name text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    notify_on_import boolean DEFAULT true NOT NULL,
+    notify_failures boolean DEFAULT true NOT NULL,
+    notify_zero_stock boolean DEFAULT true NOT NULL,
+    zero_stock_threshold integer DEFAULT 0 NOT NULL,
+    channel_id text
+);
+
+
+--
+-- Name: slack_settings_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.slack_settings_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: slack_settings_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.slack_settings_id_seq OWNED BY public.slack_settings.id;
+
+
+--
 -- Name: stocks; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -244,7 +403,9 @@ CREATE TABLE public.users (
     name character varying(100),
     is_active boolean DEFAULT true NOT NULL,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    slack_webhook_url text,
+    slack_oauth_state text
 );
 
 
@@ -265,6 +426,20 @@ CREATE SEQUENCE public.users_id_seq
 --
 
 ALTER SEQUENCE public.users_id_seq OWNED BY public.users.id;
+
+
+--
+-- Name: csv_upload_items id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_upload_items ALTER COLUMN id SET DEFAULT nextval('public.csv_upload_items_id_seq'::regclass);
+
+
+--
+-- Name: csv_uploads id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_uploads ALTER COLUMN id SET DEFAULT nextval('public.csv_uploads_id_seq'::regclass);
 
 
 --
@@ -303,10 +478,33 @@ ALTER TABLE ONLY public.restock_idempotency ALTER COLUMN id SET DEFAULT nextval(
 
 
 --
+-- Name: slack_settings id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.slack_settings ALTER COLUMN id SET DEFAULT nextval('public.slack_settings_id_seq'::regclass);
+
+
+--
 -- Name: users id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval('public.users_id_seq'::regclass);
+
+
+--
+-- Name: csv_upload_items csv_upload_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_upload_items
+    ADD CONSTRAINT csv_upload_items_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: csv_uploads csv_uploads_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_uploads
+    ADD CONSTRAINT csv_uploads_pkey PRIMARY KEY (id);
 
 
 --
@@ -342,11 +540,43 @@ ALTER TABLE ONLY public.products
 
 
 --
+-- Name: readmodel_apply_log readmodel_apply_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.readmodel_apply_log
+    ADD CONSTRAINT readmodel_apply_log_pkey PRIMARY KEY (outbox_id);
+
+
+--
 -- Name: restock_idempotency restock_idempotency_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.restock_idempotency
     ADD CONSTRAINT restock_idempotency_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: slack_installations slack_installations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.slack_installations
+    ADD CONSTRAINT slack_installations_pkey PRIMARY KEY (owner_id);
+
+
+--
+-- Name: slack_settings slack_settings_owner_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.slack_settings
+    ADD CONSTRAINT slack_settings_owner_id_key UNIQUE (owner_id);
+
+
+--
+-- Name: slack_settings slack_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.slack_settings
+    ADD CONSTRAINT slack_settings_pkey PRIMARY KEY (id);
 
 
 --
@@ -366,6 +596,20 @@ ALTER TABLE ONLY public.users
 
 
 --
+-- Name: idx_apply_log_applied_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_apply_log_applied_at ON public.readmodel_apply_log USING btree (applied_at DESC);
+
+
+--
+-- Name: idx_apply_log_owner_product_time; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_apply_log_owner_product_time ON public.readmodel_apply_log USING btree (owner_id, product_id, applied_at DESC);
+
+
+--
 -- Name: idx_inventory_events_owner_created; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -380,10 +624,66 @@ CREATE INDEX idx_inventory_events_product_created ON public.inventory_events USI
 
 
 --
+-- Name: idx_product_search_last_outbox_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_product_search_last_outbox_id ON public.product_search USING btree (last_outbox_id);
+
+
+--
 -- Name: idx_product_search_owner_not_deleted; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_product_search_owner_not_deleted ON public.product_search USING btree (owner_id, updated_at DESC) WHERE (is_deleted = false);
+
+
+--
+-- Name: idx_slack_installations_team_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_slack_installations_team_id ON public.slack_installations USING btree (team_id);
+
+
+--
+-- Name: idx_slack_settings_owner_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_slack_settings_owner_id ON public.slack_settings USING btree (owner_id);
+
+
+--
+-- Name: ix_csv_upload_items_owner_product; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_csv_upload_items_owner_product ON public.csv_upload_items USING btree (owner_id, product_id);
+
+
+--
+-- Name: ix_csv_upload_items_upload; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_csv_upload_items_upload ON public.csv_upload_items USING btree (upload_id);
+
+
+--
+-- Name: ix_csv_upload_items_upload_issue; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_csv_upload_items_upload_issue ON public.csv_upload_items USING btree (upload_id, issue_code);
+
+
+--
+-- Name: ix_csv_uploads_owner_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_csv_uploads_owner_created ON public.csv_uploads USING btree (owner_id, created_at DESC);
+
+
+--
+-- Name: ix_csv_uploads_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_csv_uploads_status ON public.csv_uploads USING btree (status);
 
 
 --
@@ -422,10 +722,64 @@ CREATE UNIQUE INDEX ix_users_email ON public.users USING btree (email);
 
 
 --
+-- Name: ux_products_owner_name_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX ux_products_owner_name_active ON public.products USING btree (owner_id, name) WHERE (is_deleted = false);
+
+
+--
 -- Name: ux_restock_idem; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX ux_restock_idem ON public.restock_idempotency USING btree (owner_id, idem_key, endpoint);
+
+
+--
+-- Name: slack_settings trg_slack_settings_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_slack_settings_updated_at BEFORE UPDATE ON public.slack_settings FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: csv_upload_items csv_upload_items_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_upload_items
+    ADD CONSTRAINT csv_upload_items_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: csv_upload_items csv_upload_items_upload_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_upload_items
+    ADD CONSTRAINT csv_upload_items_upload_id_fkey FOREIGN KEY (upload_id) REFERENCES public.csv_uploads(id) ON DELETE CASCADE;
+
+
+--
+-- Name: csv_uploads csv_uploads_approved_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_uploads
+    ADD CONSTRAINT csv_uploads_approved_by_fkey FOREIGN KEY (approved_by) REFERENCES public.users(id);
+
+
+--
+-- Name: csv_uploads csv_uploads_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_uploads
+    ADD CONSTRAINT csv_uploads_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: csv_uploads csv_uploads_requested_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.csv_uploads
+    ADD CONSTRAINT csv_uploads_requested_by_fkey FOREIGN KEY (requested_by) REFERENCES public.users(id);
 
 
 --
@@ -469,6 +823,22 @@ ALTER TABLE ONLY public.products
 
 
 --
+-- Name: slack_installations slack_installations_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.slack_installations
+    ADD CONSTRAINT slack_installations_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: slack_settings slack_settings_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.slack_settings
+    ADD CONSTRAINT slack_settings_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
 -- Name: stocks stocks_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -488,174 +858,5 @@ ALTER TABLE ONLY public.stocks
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 56JMA9veyCDOzBV5AttXJGnYRLlxMZiGdSRNbUt9povmiiXaYQNA62CLdR4DIOg
+\unrestrict FkgvRcBVSA2wdErpIlcI4XOZx75MyhjQjtclMqgYDyh2Lwy6l12MBq6LzfKHB0X
 
---
--- Name: csv_uploads; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.csv_uploads (
-    id bigint NOT NULL,
-    owner_id bigint NOT NULL,
-    file_name text NOT NULL,
-    file_sha256 text,
-    status text DEFAULT 'UPLOADED'::text NOT NULL,
-    total_rows integer DEFAULT 0 NOT NULL,
-    valid_rows integer DEFAULT 0 NOT NULL,
-    invalid_rows integer DEFAULT 0 NOT NULL,
-    requested_by bigint,
-    approved_by bigint,
-    reject_reason text,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
-);
-
---
--- Name: csv_uploads_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.csv_uploads_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
---
--- Name: csv_uploads_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.csv_uploads_id_seq OWNED BY public.csv_uploads.id;
-
---
--- Name: csv_uploads id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.csv_uploads
-    ALTER COLUMN id SET DEFAULT nextval('public.csv_uploads_id_seq'::regclass);
-
---
--- Name: csv_uploads csv_uploads_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.csv_uploads
-    ADD CONSTRAINT csv_uploads_pkey PRIMARY KEY (id);
-
---
--- Name: csv_upload_items; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.csv_upload_items (
-    id bigint NOT NULL,
-    upload_id bigint NOT NULL,
-    owner_id bigint NOT NULL,
-    product_id bigint NOT NULL,
-    before_qty integer,
-    after_qty integer,
-    delta_qty integer,
-    issue_code text DEFAULT 'OK'::text NOT NULL,
-    issue_msg text,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
-);
-
---
--- Name: csv_upload_items_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.csv_upload_items_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
---
--- Name: csv_upload_items_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.csv_upload_items_id_seq OWNED BY public.csv_upload_items.id;
-
---
--- Name: csv_upload_items id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.csv_upload_items
-    ALTER COLUMN id SET DEFAULT nextval('public.csv_upload_items_id_seq'::regclass);
-
---
--- Name: csv_upload_items csv_upload_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.csv_upload_items
-    ADD CONSTRAINT csv_upload_items_pkey PRIMARY KEY (id);
-
---
--- Name: ix_csv_uploads_owner_created; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX ix_csv_uploads_owner_created ON public.csv_uploads USING btree (owner_id, created_at DESC);
-
---
--- Name: ix_csv_uploads_status; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX ix_csv_uploads_status ON public.csv_uploads USING btree (status);
-
---
--- Name: ix_csv_upload_items_upload; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX ix_csv_upload_items_upload ON public.csv_upload_items USING btree (upload_id);
-
---
--- Name: ix_csv_upload_items_upload_issue; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX ix_csv_upload_items_upload_issue ON public.csv_upload_items USING btree (upload_id, issue_code);
-
---
--- Name: ix_csv_upload_items_owner_product; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX ix_csv_upload_items_owner_product ON public.csv_upload_items USING btree (owner_id, product_id);
-
---
--- Name: csv_uploads csv_uploads_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.csv_uploads
-    ADD CONSTRAINT csv_uploads_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id) ON DELETE CASCADE;
-
---
--- Name: csv_uploads csv_uploads_requested_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.csv_uploads
-    ADD CONSTRAINT csv_uploads_requested_by_fkey FOREIGN KEY (requested_by) REFERENCES public.users(id);
-
---
--- Name: csv_uploads csv_uploads_approved_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.csv_uploads
-    ADD CONSTRAINT csv_uploads_approved_by_fkey FOREIGN KEY (approved_by) REFERENCES public.users(id);
-
---
--- Name: csv_upload_items csv_upload_items_upload_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.csv_upload_items
-    ADD CONSTRAINT csv_upload_items_upload_id_fkey FOREIGN KEY (upload_id) REFERENCES public.csv_uploads(id) ON DELETE CASCADE;
-
---
--- Name: csv_upload_items csv_upload_items_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.csv_upload_items
-    ADD CONSTRAINT csv_upload_items_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id) ON DELETE CASCADE;
-
---
--- (선택) product_id는 products에 FK 걸 수도 있는데,
--- CSV에 "없는 product_id"도 diff에 담고 싶으면 FK는 안 거는 게 안전함.
--- 그래서 product_id FK는 MVP에서는 생략!
---
