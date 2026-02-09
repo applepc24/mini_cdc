@@ -69,6 +69,12 @@
 - CSV 업로드를 스냅샷 반영으로 시작하고, 반영 과정 변경 이벤트(Outbox)를 알림/검색/추천에 재사용 가능
 - 초기 단순 폴링/SSE → 규모 증가 시 Redis Pub/Sub/스트림으로 확장 고려
 
+
+### 7) Slack Integration (OAuth + Notifications)
+- Slack OAuth로 워크스페이스에 앱을 연결해, 운영 이벤트/리포트를 채널로 전달할 수 있습니다.
+- (예) 재고 부족/재입고 추천 결과를 Slack으로 공유, 운영자가 바로 의사결정/조치 가능
+- OAuth 완료 후 워크스페이스 단위 토큰/설정을 저장하고, API가 Slack API로 메시지를 전송합니다.
+
 ---
 
 ## Tech Stack
@@ -125,6 +131,13 @@
 - `POST /ai/restock/agent?dry_run=true`
 - `POST /ai/restock/agent?dry_run=true&explain_llm=true`
 
+
+### 5) Slack
+- `GET  /slack/oauth/start` : Slack OAuth 시작(Authorize로 리다이렉트)
+- `GET  /slack/oauth/callback` : Slack OAuth 콜백(코드 교환 및 설치 완료)
+- `POST /slack/notify` : (옵션) 특정 이벤트/리포트를 Slack 채널로 전송
+- `GET  /slack/status` : (옵션) 현재 연동 상태 확인
+
 ---
 
 ## Reliability Notes (장애/복구)
@@ -158,3 +171,35 @@ python scripts/init_db.py
 	2.	Docker Compose로 전체 서비스 실행
 
 docker compose up -d --build
+
+## Slack Setup (OAuth)
+
+Slack 연동은 **Slack App 설정 + 서버 환경변수 + Redirect URL 일치**가 핵심입니다.
+
+### 1) Slack App 생성
+1. Slack API에서 새 App 생성
+2. **OAuth & Permissions**에서 필요한 Scope 설정
+   - Bot Token Scopes 예시:
+     - `chat:write` (채널 메시지 전송)
+     - (필요 시) `channels:read`, `groups:read` 등
+
+### 2) Redirect URL 등록 (중요)
+Slack은 OAuth 과정에서 전달된 `redirect_uri`가 **App에 등록된 Redirect URLs와 1글자라도 다르면** 인증을 거부합니다.
+
+- 로컬 개발:
+  - `http://localhost:8000/slack/oauth/callback`
+- 운영 배포 예시:
+  - `https://api.stockops.site/slack/oauth/callback`
+
+Slack App → **OAuth & Permissions → Redirect URLs**에 위 주소를 정확히 추가하고 저장하세요.
+
+### 3) Backend 환경변수(.env)
+예시:
+
+```bash
+SLACK_CLIENT_ID=xxxxx
+SLACK_CLIENT_SECRET=xxxxx
+SLACK_REDIRECT_URL=https://api.stockops.site/slack/oauth/callback  # 운영 기준
+SLACK_APP_BASE_URL=https://api.stockops.site                       # (선택) 서버 base
+WEB_BASE_URL=https://www.stockops.site                             # (선택) 프론트 base
+
