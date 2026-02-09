@@ -32,11 +32,6 @@ const REQUIRED_HEADERS = ["name", "category", "price", "qty"] as const;
 
 type Step = "pick" | "confirm" | "done";
 
-function downloadCsvTemplate() {
-  // 파일 다운로드는 fetch보다 location 이동이 제일 간단/확실함
-  window.location.href = `${API_BASE}/products/import/template`;
-}
-
 function parseCsvHeader(text: string) {
   const cleaned = text.replace(/^\uFEFF/, "");
   const firstLine = cleaned.split(/\r?\n/)[0] ?? "";
@@ -80,6 +75,23 @@ export function CsvImportModal({
     null,
   );
   const [slackLoading, setSlackLoading] = useState(false);
+
+  // ✅ 공통 로그인 가드
+  const requireLoginOrRedirect = () => {
+    const token = getAccessToken();
+    if (!token) {
+      window.location.href = "/login";
+      return null;
+    }
+    return token;
+  };
+
+  // ✅ 템플릿 다운로드(로그인 필요)
+  const handleDownloadTemplate = () => {
+    const token = requireLoginOrRedirect();
+    if (!token) return;
+    window.location.href = `${API_BASE}/products/import/template`;
+  };
 
   const headerOk = useMemo(() => {
     if (!header) return false;
@@ -130,10 +142,6 @@ export function CsvImportModal({
     setResult(null);
     setShowDetail(false);
 
-    // Slack 상태는 모달을 다시 열 때 갱신되도록 유지해도 되지만,
-    // UX상 닫을 때 초기화하는게 더 직관적이면 아래 줄 활성화
-    // setSlackSettings(null);
-
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -174,11 +182,9 @@ export function CsvImportModal({
   };
 
   const handleUpload = async () => {
-    const token = getAccessToken();
-    if (!token) {
-      setError("로그인이 필요합니다.");
-      return;
-    }
+    const token = requireLoginOrRedirect();
+    if (!token) return;
+
     if (!file || !headerOk) return;
 
     setError("");
@@ -205,7 +211,9 @@ export function CsvImportModal({
         msg.includes("403") ||
         msg.includes("AUTH_REQUIRED")
       ) {
-        setError("로그인이 필요합니다.");
+        // ✅ 인증 필요면 로그인으로 이동 (통일)
+        window.location.href = "/login";
+        return;
       } else {
         setError(msg);
       }
@@ -272,7 +280,7 @@ export function CsvImportModal({
             <Button
               type="button"
               variant="outline"
-              onClick={downloadCsvTemplate}
+              onClick={handleDownloadTemplate}
               disabled={submitting}
             >
               CSV 템플릿 다운로드
@@ -390,6 +398,8 @@ export function CsvImportModal({
                       type="button"
                       variant="outline"
                       onClick={() => {
+                        const token = requireLoginOrRedirect();
+                        if (!token) return;
                         window.location.href = "/settings#slack";
                       }}
                     >

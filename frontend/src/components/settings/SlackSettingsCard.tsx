@@ -4,8 +4,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { motion, type Variants } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 
 type SlackSettingsOut = {
   is_enabled: boolean;
@@ -18,6 +16,9 @@ type SlackTestResult = {
   status_code?: number | null;
   error?: string | null;
 };
+
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
 function getStoredToken(): string {
   if (typeof window === "undefined") return "";
@@ -39,35 +40,38 @@ function joinUrl(base: string, path: string): string {
   return `${b}${p}`;
 }
 
+function getErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object" && "message" in e) {
+    const msg = (e as { message?: unknown }).message;
+    if (typeof msg === "string") return msg;
+  }
+  return "요청 실패";
+}
+
 export function SlackSettingsCard({
   itemVariants,
 }: {
-  itemVariants?: Variants; // ✅ any 제거
+  itemVariants?: Variants;
 }) {
-  // ✅ hydration mismatch 방지: mounted 이후에만 window 기반 정보 사용
+  // hydration mismatch 방지
   const [mounted, setMounted] = useState(false);
 
-  // ✅ SSR/CSR 첫 렌더 동일: null로 시작
+  const [token, setToken] = useState<string>("");
+
+  // OAuth redirect query
   const [connected, setConnected] = useState<string | null>(null);
   const [reason, setReason] = useState<string | null>(null);
-
-  const [apiBase, setApiBase] = useState<string>(
-    process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000",
-  );
-  const [token, setToken] = useState<string>("");
 
   const [loading, setLoading] = useState(false);
   const [settings, setSettings] = useState<SlackSettingsOut | null>(null);
   const [msg, setMsg] = useState<string>("");
-  const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-
-    // localStorage 토큰 자동 채우기
     setToken(getStoredToken());
 
-    // ✅ URLSearchParams도 클라이언트에서만 읽기
     const sp = new URLSearchParams(window.location.search);
     setConnected(sp.get("connected"));
     setReason(sp.get("reason"));
@@ -75,8 +79,19 @@ export function SlackSettingsCard({
 
   const headers = useMemo(() => makeAuthHeaders(token), [token]);
 
+  function requireLoginOrRedirect(): boolean {
+    const t = token.trim();
+    if (t) return true;
+
+    const next = encodeURIComponent(
+      window.location.pathname + window.location.search,
+    );
+    window.location.href = `/login?next=${next}`;
+    return false;
+  }
+
   async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(joinUrl(apiBase, path), init);
+    const res = await fetch(joinUrl(API_BASE, path), init);
     const text = await res.text();
 
     let data: unknown = null;
@@ -86,6 +101,15 @@ export function SlackSettingsCard({
       // ignore
     }
 
+    // 인증 실패면 로그인으로
+    if (res.status === 401 || res.status === 403) {
+      const next = encodeURIComponent(
+        window.location.pathname + window.location.search,
+      );
+      window.location.href = `/login?next=${next}`;
+      throw new Error("AUTH_REQUIRED");
+    }
+
     if (!res.ok) {
       const errMsg =
         typeof data === "object" && data && "detail" in data
@@ -93,10 +117,13 @@ export function SlackSettingsCard({
           : `${res.status} ${res.statusText}`;
       throw new Error(errMsg);
     }
+
     return data as T;
   }
 
   async function onReadSettings() {
+    if (!requireLoginOrRedirect()) return;
+
     setLoading(true);
     setMsg("");
     try {
@@ -107,53 +134,46 @@ export function SlackSettingsCard({
       setSettings(data);
       setMsg("설정 조회 성공");
     } catch (e) {
-      setSettings(null);
-      setMsg(`GET /slack/settings failed: ${(e as Error).message}`);
+      const m = getErrorMessage(e);
+      if (m !== "AUTH_REQUIRED") {
+        setSettings(null);
+        setMsg(`상태 조회 실패: ${m}`);
+      }
     } finally {
       setLoading(false);
     }
   }
 
   async function onStartOAuth() {
+    if (!requireLoginOrRedirect()) return;
+
     setLoading(true);
     setMsg("");
-
     try {
-      if (!token.trim()) {
-        throw new Error("로그인 토큰이 없습니다. (로그인 후 다시 시도)");
-      }
-
-      // ✅ 옵션 B: JSON으로 authorize_url 받기
       const data = await fetchJson<{ authorize_url: string }>(
         "/slack/oauth/start",
-        {
-          method: "GET",
-          headers,
-        },
+        { method: "GET", headers },
       );
 
-      if (!data?.authorize_url) {
-        throw new Error("authorize_url missing");
-      }
-
+      if (!data?.authorize_url) throw new Error("authorize_url missing");
       window.location.href = data.authorize_url;
     } catch (e) {
-      setMsg(`OAuth 시작 실패: ${(e as Error).message}`);
+      const m = getErrorMessage(e);
+      if (m !== "AUTH_REQUIRED") setMsg(`Slack 연결 시작 실패: ${m}`);
     } finally {
       setLoading(false);
     }
   }
 
   async function onTest() {
+    if (!requireLoginOrRedirect()) return;
+
     setLoading(true);
     setMsg("");
     try {
       const data = await fetchJson<SlackTestResult>("/slack/settings/test", {
         method: "POST",
-        headers: {
-          ...headers,
-          "Content-Type": "application/json",
-        },
+        headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
 
@@ -163,18 +183,11 @@ export function SlackSettingsCard({
           : `테스트 실패: ${data.error ?? ""}`,
       );
     } catch (e) {
-      setMsg(`POST /slack/settings/test failed: ${(e as Error).message}`);
+      const m = getErrorMessage(e);
+      if (m !== "AUTH_REQUIRED") setMsg(`테스트 실패: ${m}`);
     } finally {
       setLoading(false);
     }
-  }
-
-  function onSaveTokenToLocalStorage() {
-    const t = token.trim();
-    if (!t) return;
-    window.localStorage.setItem("accessToken", t);
-    window.localStorage.setItem("token", t);
-    setMsg("localStorage에 토큰을 저장했습니다.");
   }
 
   const statusBadge = (() => {
@@ -189,13 +202,13 @@ export function SlackSettingsCard({
     return { text: "연결 안 됨", className: "bg-amber-500/15 text-amber-600" };
   })();
 
-  //  mounted 이후에만 배너 렌더
   const showOAuthBanner = mounted && (connected === "1" || connected === "0");
 
   return (
     <motion.div
       variants={itemVariants}
       className="bg-card rounded-xl border border-border p-6"
+      id="slack"
     >
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -215,7 +228,6 @@ export function SlackSettingsCard({
         </span>
       </div>
 
-      {/* OAuth redirect result banner */}
       {showOAuthBanner && (
         <div
           className={cn(
@@ -243,7 +255,6 @@ export function SlackSettingsCard({
         </div>
       )}
 
-      {/* Main actions */}
       <div className="mt-4 flex flex-wrap gap-2">
         <Button onClick={onReadSettings} disabled={loading} variant="secondary">
           상태 조회
@@ -254,18 +265,8 @@ export function SlackSettingsCard({
         <Button onClick={onTest} disabled={loading} variant="outline">
           테스트 보내기
         </Button>
-
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => setShowAdvanced((v) => !v)}
-          className="ml-auto"
-        >
-          {showAdvanced ? "고급 설정 닫기" : "고급 설정"}
-        </Button>
       </div>
 
-      {/* Status view */}
       <div className="mt-4 rounded-lg border border-border bg-muted/30 p-4 text-sm">
         {!settings ? (
           <div className="text-muted-foreground">
@@ -286,54 +287,6 @@ export function SlackSettingsCard({
         )}
       </div>
 
-      {/* Advanced */}
-      {showAdvanced && (
-        <div className="mt-4 space-y-4 rounded-lg border border-border p-4">
-          <div>
-            <Label className="mb-2 block">API Base URL</Label>
-            <Input
-              value={apiBase}
-              onChange={(e) => setApiBase(e.target.value)}
-              placeholder="http://127.0.0.1:8000"
-            />
-            <p className="mt-2 text-xs text-muted-foreground">
-              운영 환경에서는 <code>NEXT_PUBLIC_API_BASE_URL</code>로 고정하는
-              게 좋아요.
-            </p>
-          </div>
-
-          <div>
-            <Label className="mb-2 block">Bearer Token</Label>
-            <Input
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="eyJhbGciOi..."
-            />
-            <div className="mt-2 flex gap-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={onSaveTokenToLocalStorage}
-              >
-                localStorage 저장
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setToken(getStoredToken())}
-              >
-                localStorage에서 불러오기
-              </Button>
-            </div>
-            <p className="mt-2 text-xs text-muted-foreground">
-              개발용. 실제 서비스에서는 로그인/세션에서 자동으로 처리하도록
-              바꾸면 됩니다.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Message */}
       {msg && (
         <div className="mt-4 rounded-lg border border-border bg-muted p-3 text-sm whitespace-pre-wrap">
           {msg}

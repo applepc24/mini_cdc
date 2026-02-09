@@ -311,6 +311,15 @@ export default function ProductsPage() {
     setShowProductModal(true);
   }, []);
 
+  const handleCsvImport = useCallback(() => {
+    const token = getAccessToken();
+    if (!token) {
+      window.location.href = "/login";
+      return;
+    }
+    setShowCsvModal(true);
+  }, []);
+
   return (
     <AppLayout onNewProduct={handleNewProduct}>
       <Suspense fallback={<Loading />}>
@@ -328,7 +337,7 @@ export default function ProductsPage() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button onClick={() => setShowCsvModal(true)}>CSV 가져오기</Button>
+              <Button onClick={handleCsvImport}>CSV 가져오기</Button>
 
               <Button onClick={handleNewProduct}>
                 <Plus className="w-4 h-4 mr-2" />
