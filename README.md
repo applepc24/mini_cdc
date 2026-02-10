@@ -145,7 +145,63 @@
 - Consumer 중단 → 이벤트 누적 → 재기동 시 Projection 추격
 - 중복 처리/재처리 → Consumer UPSERT 멱등으로 결과 동일
 - stuck PROCESSING → 일정 시간 초과 시 NEW로 되돌리는 reaper(선택)로 복구
+  
+---
 
+
+## 📊 Reliability & Performance Tests (운영 검증 요약)
+
+본 프로젝트는 **CDC 파이프라인의 정합성, 전파 지연, 장애 복구 능력**을  
+실제 부하 조건에서 검증했습니다.
+
+### 1) 정합성 검증 (유실/중복 0)
+
+각 테스트 런마다 **“이번 런에서 생성된 이벤트(after-only)”** 기준으로 다음을 확인했습니다.
+
+- `outbox_after = N`
+- `published_after = N`
+- `applied_after = N`
+
+✅ **모든 런에서 100% 일치**  
+→ 이벤트 유실/중복 없이 Projection(Read Model)이 최종 수렴함을 확인
+
+---
+
+### 2) E2E 전파 지연 (준실시간 성능)
+
+**E2E = `created_at → applied_at`**  
+*(Write → Outbox → Kafka → ReadModel)*
+
+- 테스트 조건: **N = 5,000**, 동시성(CONC) 변화
+- 결과 요약:
+  - **동시성 10~25**: 안정적인 p95 (**≈ 0.6~0.9s**)
+  - **동시성 50+**: p95/p99 tail 증가 (**≈ 1.6~2.1s**)
+
+Latency breakdown 분석 결과,  
+**E2E tail의 주 원인은 Relay(`created → published`) 구간**이며  
+Consumer(`published → applied`)는 상대적으로 안정적임을 확인했습니다.
+
+---
+
+### 3) 장애 복구 (MTTR) 검증
+
+Consumer 중단 상태에서 이벤트 backlog를 누적한 뒤,  
+재기동 시 backlog가 0으로 수렴할 때까지의 시간을 측정했습니다.
+
+- **N = 5,000 기준 MTTR: 약 20~35초**
+- 요청 전송 완료 후 **1초 내 backlog 0 수렴**
+
+✅ Consumer 다운타임 중 backlog가 유입되어도,  
+**재기동 후 빠르게 정상화되는 복구 특성**을 확인
+
+---
+
+### 4) 요약 (한 줄)
+
+- **Outbox→Kafka→ReadModel 파이프라인에서 5,000 이벤트 유실/중복 0 + Consumer 장애 후 MTTR 20~35초 내 수렴 검증**
+- **동시성 증가 시 E2E tail이 Relay publish 구간에서 발생함을 수치로 확인**
+
+  
 ---
 
 ## Run Locally
@@ -202,4 +258,5 @@ SLACK_CLIENT_SECRET=xxxxx
 SLACK_REDIRECT_URL=https://api.stockops.site/slack/oauth/callback  # 운영 기준
 SLACK_APP_BASE_URL=https://api.stockops.site                       # (선택) 서버 base
 WEB_BASE_URL=https://www.stockops.site                             # (선택) 프론트 base
+
 
