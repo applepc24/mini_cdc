@@ -1,4 +1,4 @@
-# StackOps (Mini CDC / CQRS) — 재고/상품 운영용 CDC + Projection 시스템
+# StockOps (Mini CDC / CQRS) — 재고/상품 운영용 CDC + Projection 시스템
 
 상품/재고 운영에서 **쓰기(정규화 DB)** 와 **읽기(검색/집계/화면)** 요구가 충돌하는 문제를 해결하기 위해  
 **Mini CDC + CQRS(Write/Read 분리) + Projection(Read Model)** 구조를 설계·구현한 프로젝트입니다.
