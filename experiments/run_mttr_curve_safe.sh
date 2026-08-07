@@ -269,8 +269,10 @@ for N in $N_LIST; do
       echo "[STEP] starting consumer..."
       docker compose start consumer >/dev/null
 
-      echo "[WAIT] measuring MTTR until applied == $N ..."
-      MTTR_MS="$(measure_mttr_ms "$N" "$START_OUTBOX_ID" "$OWNER" "$PID" "$WAIT")"
+      # 목표치는 N이 아니라 실제 성공한 요청 수(REQ_OK) 기준이어야 한다.
+      # 요청이 일부 실패하면 이벤트가 N보다 적게 생기므로 N을 기다리면 영원히 끝나지 않는다.
+      echo "[WAIT] measuring MTTR until applied == $REQ_OK ..."
+      MTTR_MS="$(measure_mttr_ms "$REQ_OK" "$START_OUTBOX_ID" "$OWNER" "$PID" "$WAIT")"
       echo "[RESULT] mttr_ms=$MTTR_MS"
 
       # 5) final verification

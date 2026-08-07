@@ -178,7 +178,14 @@ def adjust_stock_with_outbox(
         return None
 
     # 2) stock 조회 (없으면 0으로 생성)
-    stock = db.get(Stock, product_id)
+    #    동시 요청이 같은 행을 읽고 각자 계산해 덮어쓰는 lost update를 막기 위해
+    #    행 잠금을 걸고 읽는다 (SELECT ... FOR UPDATE)
+    stock = (
+        db.query(Stock)
+        .filter(Stock.product_id == product_id, Stock.owner_id == owner_id)
+        .with_for_update()
+        .first()
+    )
     if not stock:
         stock = Stock(product_id=product_id, owner_id=owner_id, qty=0)
         db.add(stock)
