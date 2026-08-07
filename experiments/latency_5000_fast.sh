@@ -51,10 +51,13 @@ PY
 echo "[OK] owner_id=${OWNER_ID}"
 
 # 1) product 생성 (반드시 이 TOKEN으로 만든 product로만 테스트)
+#    products에 (owner_id, name) 활성 유니크 제약(ux_products_owner_name_active)이 있어
+#    이름을 고정하면 두 번째 실행부터 500이 난다. 실행마다 유일한 이름을 쓴다.
+PRODUCT_NAME="latency-fast-product-$(date +%s)-${CONCURRENCY}-$$"
 CREATE_RES="$(curl -s -X POST "${API_BASE}/products" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${TOKEN}" \
-  -d '{"name":"latency-fast-product","category":"cat","price":1000,"qty":0}')"
+  -d "{\"name\":\"${PRODUCT_NAME}\",\"category\":\"cat\",\"price\":1000,\"qty\":0}")"
 
 PRODUCT_ID="$(python - <<PY
 import json

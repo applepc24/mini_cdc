@@ -10,6 +10,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -104,6 +105,19 @@ class OutboxEvent(Base):
     created_at = Column(TIMESTAMP, server_default=text("CURRENT_TIMESTAMP"))
     retry_count = Column(Integer, nullable=False, default=0)
     last_error = Column(Text, nullable=True)
+
+    __table_args__ = (
+        # relay가 0.5초마다 도는 폴링 쿼리 전용 부분 인덱스.
+        #   SELECT * FROM outbox_events WHERE status='NEW' ORDER BY id LIMIT n
+        # status 인덱스가 없으면 SENT까지 포함한 전체 순차 스캔이 되어
+        # 테이블이 커질수록 relay 지연이 선형으로 나빠진다.
+        # NEW인 행만 담으므로 인덱스가 항상 작게 유지되고, id 정렬도 함께 해결된다.
+        Index(
+            "ix_outbox_events_status_new",
+            "id",
+            postgresql_where=text("status = 'NEW'"),
+        ),
+    )
 
 
 class ProductSearch(Base):
