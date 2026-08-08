@@ -18,7 +18,7 @@ CONSUMER_GROUP = os.getenv("CONSUMER_GROUP", "mini-cdc-consumer")
 print(f"[Consumer] bootstrap={KAFKA_BOOTSTRAP}, topic={KAFKA_TOPIC}, group={CONSUMER_GROUP}")
 
 
-def apply_stock_adjusted(db, owner_id: int, payload: dict, outbox_id: int):
+def apply_stock_adjusted(db, owner_id: int, payload: dict, outbox_id: int) -> int:
     sql = text("""
         UPDATE product_search
         SET
@@ -28,15 +28,18 @@ def apply_stock_adjusted(db, owner_id: int, payload: dict, outbox_id: int):
         WHERE product_id = :product_id
           AND owner_id = :owner_id
     """)
-    db.execute(sql, {
+    result = db.execute(sql, {
         "product_id": payload["productId"],
         "owner_id": owner_id,
         "after_qty": payload["afterQty"],
         "outbox_id": outbox_id,
     })
+    # 실제로 몇 행이 바뀌었는지. 0이면 대상 행이 없었다는 뜻이고,
+    # SQL 상으로는 정상 성공이라 예외가 나지 않는다.
+    return result.rowcount
 
 
-def soft_delete_product_search(db, owner_id: int, payload: dict, outbox_id: int):
+def soft_delete_product_search(db, owner_id: int, payload: dict, outbox_id: int) -> int:
     sql = text("""
         UPDATE product_search
         SET
@@ -47,15 +50,16 @@ def soft_delete_product_search(db, owner_id: int, payload: dict, outbox_id: int)
         WHERE product_id = :product_id
           AND owner_id = :owner_id
     """)
-    db.execute(sql, {
+    result = db.execute(sql, {
         "product_id": payload["productId"],
         "owner_id": owner_id,
         "deleted_at": payload.get("deletedAt"),
         "outbox_id": outbox_id,
     })
+    return result.rowcount
 
 
-def upsert_product_search(db, owner_id: int, payload: dict, outbox_id: int):
+def upsert_product_search(db, owner_id: int, payload: dict, outbox_id: int) -> int:
     # ⚠️ 멀티-테넌시(owner_id) 안전하게: 같은 product_id라도 owner_id가 다르면 업데이트 금지
     # (네 스키마가 product_id 단독 UNIQUE라면 이 WHERE 절이 꼭 필요함)
     sql = text("""
@@ -76,7 +80,7 @@ def upsert_product_search(db, owner_id: int, payload: dict, outbox_id: int):
             updated_at = NOW()
         WHERE product_search.owner_id = EXCLUDED.owner_id
     """)
-    db.execute(sql, {
+    result = db.execute(sql, {
         "product_id": payload["productId"],
         "owner_id": owner_id,
         "name": payload["name"],
@@ -85,7 +89,36 @@ def upsert_product_search(db, owner_id: int, payload: dict, outbox_id: int):
         "qty": payload["qty"],
         "outbox_id": outbox_id,
     })
+    return result.rowcount
 
+
+def record_dlq(db, value: dict, msg, reason: str) -> None:
+    """읽기 모델에 반영되지 못한 이벤트를 DLQ에 남긴다.
+
+    핵심은 '여기에 쓴다'가 아니라 'readmodel_apply_log 에 안 쓴다'는 것이다.
+    거기에 도장이 찍히면 already_processed() 가 영구히 스킵시켜
+    나중에 리플레이해도 복구할 수 없게 된다.
+    """
+    sql = text("""
+        INSERT INTO consumer_dlq
+            (outbox_id, owner_id, product_id, event_type, reason,
+             payload, kafka_partition, kafka_offset, created_at)
+        VALUES
+            (:outbox_id, :owner_id, :product_id, :event_type, :reason,
+             CAST(:payload AS JSONB), :partition, :offset, NOW())
+    """)
+    db.execute(sql, {
+        "outbox_id": value["outboxId"],
+        "owner_id": value.get("ownerId"),
+        "product_id": (value.get("payload") or {}).get("productId"),
+        "event_type": value.get("eventType"),
+        "reason": reason,
+        # 이벤트 전문을 통째로 보관한다. 일부 필드만 저장하면
+        # 나중에 재처리할 때 정보가 모자란다.
+        "payload": json.dumps(value, ensure_ascii=False),
+        "partition": msg.partition,
+        "offset": msg.offset,
+    })
 
 def record_apply_log(db, owner_id: int, product_id: int, event_type: str, outbox_id: int):
     # outbox_id가 PK라서 중복 insert는 무시(멱등)
@@ -161,13 +194,33 @@ def main():
                 consumer.commit()
                 continue
 
-            # 3) 이벤트 적용
+            # 3) 이벤트 적용 — 반영된 행 수를 받는다
             if event_type == "PRODUCT_DELETED":
-                soft_delete_product_search(db, owner_id, payload, outbox_id)
+                rows = soft_delete_product_search(db, owner_id, payload, outbox_id)
             elif event_type == "STOCK_ADJUSTED":
-                apply_stock_adjusted(db, owner_id, payload, outbox_id)
+                rows = apply_stock_adjusted(db, owner_id, payload, outbox_id)
             else:
-                upsert_product_search(db, owner_id, payload, outbox_id)
+                rows = upsert_product_search(db, owner_id, payload, outbox_id)
+
+            # 3-b) 0건은 '적용 성공'이 아니다.
+            #
+            # SQL에서 "조건에 맞는 행 없음"은 에러가 아니라 정상 완료다.
+            # 예외가 안 나므로 그냥 두면 아래 record_apply_log 까지 진행되어
+            # "처리 완료" 도장이 찍힌다. 그러면 already_processed() 가
+            # 영구히 스킵시켜 리플레이해도 복구할 수 없다.
+            #
+            # 그래서 apply_log 를 건너뛰고 DLQ 에만 남긴 뒤 다음으로 넘어간다.
+
+            if rows == 0:
+                print(
+                    f"[Consumer] DLQ: no target row "
+                    f"outbox={outbox_id} owner={owner_id} "
+                    f"product={product_id} type={event_type}"
+                )
+                record_dlq(db, value, msg, reason="no_target_row")
+                db.commit()
+                consumer.commit()
+                continue
 
             # 4) 적용 성공 후 apply log 기록
             record_apply_log(db, owner_id, product_id, event_type, outbox_id)

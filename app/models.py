@@ -302,3 +302,33 @@ class SlackSettings(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+class ConsumerDlq(Base):
+    """Consumer가 이벤트를 읽기 모델에 반영하지 못한 건을 기록한다.
+
+    UPDATE/UPSERT가 0건이면 '적용 성공'이 아니다. 그런데 SQL에서 0건은
+    에러가 아니므로 예외가 나지 않는다. 이 경우 readmodel_apply_log에
+    기록하면 already_processed()가 영구히 스킵시켜 복구가 불가능해진다.
+
+    따라서 apply_log 대신 여기에 남기고 파이프라인은 계속 진행한다.
+    '무엇이 유실됐는지'가 데이터로 남아야 나중에 재처리할 수 있다.
+    """
+
+    __tablename__ = "consumer_dlq"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    # owner_id / product_id 에 ForeignKey 를 걸지 않는다.
+    # 다른 테이블은 ondelete="CASCADE" 인데, 그러면 사용자가 삭제될 때
+    # 사고 기록까지 같이 사라진다. DLQ는 원인 추적용이라 보존이 우선이다.
+    outbox_id = Column(BigInteger, nullable=False, index=True)
+    owner_id = Column(BigInteger, nullable=True)
+    product_id = Column(BigInteger, nullable=True)
+    event_type = Column(Text, nullable=True)
+    reason = Column(Text, nullable=False)
+    payload = Column(JSONB, nullable=False)
+    kafka_partition = Column(Integer, nullable=True)
+    kafka_offset = Column(BigInteger, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
