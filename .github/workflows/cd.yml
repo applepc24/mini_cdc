@@ -114,7 +114,9 @@ jobs:
           scp -i ~/.ssh/id_deploy -P "$SSH_PORT" \
             docker-compose.prod.yml scripts/deploy.sh \
             "$SSH_TARGET:$APP_DIR/"
-          scp -i ~/.ssh/id_deploy -P "$SSH_PORT" \
+          # -r 필수: 디렉터리 내용을 옮기므로. 없으면
+          #   scp: local "docker/initdb/." is not a regular file
+          scp -i ~/.ssh/id_deploy -P "$SSH_PORT" -r \
             docker/initdb/. \
             "$SSH_TARGET:$APP_DIR/docker/initdb/"
 
