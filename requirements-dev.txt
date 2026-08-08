@@ -1,0 +1,5 @@
+# 로컬/CI 전용 의존성. 운영 이미지(Dockerfile)에는 들어가지 않는다.
+-r requirements.txt
+
+pytest>=8.3,<9
+ruff==0.14.14

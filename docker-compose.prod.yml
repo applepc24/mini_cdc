@@ -1,17 +1,30 @@
+# 운영용 compose. 서버(/opt/stockops)에 이 파일 + .env.prod 가 있어야 한다.
+#
+# 실행:
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#
+# 시크릿은 이 파일에 절대 넣지 않는다(=git 커밋됨). 전부 .env.prod 로.
+
+# ⚠️ 프로젝트 이름 고정. 생략하면 compose가 "디렉터리 이름"을 프로젝트명으로 쓰고
+#    볼륨/네트워크 이름이 그에 따라 바뀐다(mini-cdc_pgdata → <디렉터리>_pgdata).
+#    기존 볼륨을 못 찾아 "빈 DB"로 뜨는 사고를 막기 위해 명시한다.
+name: mini-cdc
+
 services:
+  # ── 인프라: CD가 건드리지 않는다. 서버에 상주. ──────────────────
   db:
     image: pgvector/pgvector:pg16
     container_name: mini-cdc-postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: mini_cdc
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/initdb:/docker-entrypoint-initdb.d
-
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d mini_cdc"]
+      test:
+        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 3s
       timeout: 3s
       retries: 30
@@ -23,7 +36,6 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-
     healthcheck:
       test: ["CMD-SHELL", "bash -lc 'echo > /dev/tcp/127.0.0.1/2181'"]
       interval: 5s
@@ -37,24 +49,28 @@ services:
     depends_on:
       zookeeper:
         condition: service_healthy
-
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
       KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092"
-      # NOTE: 외부에서 kafka 직접 쓸 거면 여기 localhost를 IP/도메인으로 바꿔야 함
       KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     healthcheck:
-      test: ["CMD-SHELL","kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      test:
+        [
+          "CMD-SHELL",
+          "kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1",
+        ]
       interval: 5s
       timeout: 5s
       retries: 30
     restart: unless-stopped
 
+  # ── 앱: CD가 매 배포마다 교체하는 대상 ─────────────────────────
+  # 세 서비스가 같은 이미지를 쓰고 command 로만 갈라진다.
   api:
-    build: .
+    image: ${IMAGE}
     container_name: mini-cdc-api
     depends_on:
       db:
@@ -62,52 +78,41 @@ services:
       kafka:
         condition: service_started
     ports:
-      - "8000:8000"
-    environment:
-      DATABASE_URL: "postgresql+psycopg://postgres:postgres@db:5432/mini_cdc"
-      KAFKA_BOOTSTRAP: "kafka:9092"
-      KAFKA_TOPIC: "product-events"
-      JWT_SECRET_KEY: "dev-secret"
-      JWT_ALGORITHM: "HS256"
-      JWT_EXPIRE_MINUTES: "60"
-      OPENAI_API_KEY: "${OPENAI_API_KEY}"
-      OPENAI_MODEL: "gpt-4o-mini"
-    command: >
-      uvicorn app.main:app --host 0.0.0.0 --port 8000
+      # 127.0.0.1 바인딩: 외부 노출은 리버스 프록시(443)만 담당.
+      # 배포 스크립트의 헬스체크도 이 포트를 쓴다.
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - .env.prod
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     restart: unless-stopped
 
   relay:
-    build: .
+    image: ${IMAGE}
     container_name: mini-cdc-relay
     depends_on:
       db:
         condition: service_healthy
       kafka:
         condition: service_healthy
+    env_file:
+      - .env.prod
     environment:
-      DATABASE_URL: "postgresql+psycopg://postgres:postgres@db:5432/mini_cdc"
-      KAFKA_BOOTSTRAP: "kafka:9092"
-      KAFKA_TOPIC: "product-events"
-      KAFKA_DLQ_TOPIC: "product-events-dlq"
       RELAY_MAX_RETRY: "5"
-      RELAY_BATCH_SIZE: "10"
-      RELAY_POLL_INTERVAL_SEC: "1.0"
+      RELAY_BATCH_SIZE: "200"
+      RELAY_POLL_INTERVAL_SEC: "0.5"
     command: ["python", "-m", "relay.main"]
     restart: unless-stopped
 
   consumer:
-    build: .
+    image: ${IMAGE}
     container_name: mini-cdc-consumer
     depends_on:
       db:
         condition: service_healthy
       kafka:
         condition: service_healthy
-    environment:
-      DATABASE_URL: "postgresql+psycopg://postgres:postgres@db:5432/mini_cdc"
-      KAFKA_BOOTSTRAP: "kafka:9092"
-      KAFKA_TOPIC: "product-events"
-      CONSUMER_GROUP: "mini-cdc-consumer-v2"
+    env_file:
+      - .env.prod
     command: ["python", "-m", "consumer.main"]
     restart: unless-stopped
 

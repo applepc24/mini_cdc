@@ -1,3 +1,14 @@
+# ⚠️ 시크릿: 절대 이미지에 들어가면 안 됨.
+# COPY . /app 로 한 번 구워지면 이후 RUN rm 으로 지워도 이전 레이어에 남는다.
+# 운영 환경변수는 이미지가 아니라 실행 시점(.env.prod / env_file)에 주입한다.
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.crt
+
 # python
 .venv/
 **/__pycache__/
