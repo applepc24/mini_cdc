@@ -1,0 +1,149 @@
+name: CD
+
+# main 푸시 → CI 통과 → GHCR 빌드/푸시 → 홈서버 SSH 배포 → 헬스체크(실패 시 자동 롤백)
+#
+# 수동 롤백:
+#   Actions → CD → Run workflow → image_tag 에 sha-abc1234 입력
+#   (빌드를 건너뛰고 GHCR에 이미 있는 태그를 그대로 배포)
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "롤백할 기존 태그 (예: sha-abc1234). 비우면 현재 커밋을 빌드해서 배포."
+        required: false
+        default: ""
+
+# GITHUB_TOKEN 권한 최소화. 이 토큰은 job 종료 시 만료되므로 장기 PAT가 필요 없다.
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: cd-prod
+  # 배포 도중 취소는 서버를 어중간한 상태로 남긴다. 겹치면 취소가 아니라 대기.
+  cancel-in-progress: false
+
+jobs:
+  # ── 1. 게이트: ci.yml 을 그대로 재사용 ─────────────────────
+  ci:
+    if: ${{ !inputs.image_tag }}
+    uses: ./.github/workflows/ci.yml
+
+  # ── 2. 빌드 & GHCR 푸시 ────────────────────────────────────
+  build:
+    needs: ci
+    if: ${{ !inputs.image_tag }}
+    runs-on: ubuntu-latest
+    outputs:
+      # job은 서로 다른 VM에서 돌기 때문에 값 전달은 outputs로만 가능하다.
+      image: ${{ steps.tag.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tag
+        id: tag
+        run: |
+          # GHCR 경로는 소문자만 허용한다.
+          base="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          echo "base=${base}"                       >> "$GITHUB_OUTPUT"
+          echo "image=${base}:sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # sha- 태그: 롤백용 불변 좌표. latest: 사람이 보기 편한 별칭.
+          tags: |
+            ${{ steps.tag.outputs.image }}
+            ${{ steps.tag.outputs.base }}:latest
+          # 러너는 매번 새 VM이라 로컬 캐시가 없다. GitHub 캐시에 레이어를 보관.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── 3. 홈서버 배포 ─────────────────────────────────────────
+  deploy:
+    needs: build
+    # 배포 조건은 정확히 둘 중 하나: 빌드 성공 | 롤백 실행.
+    #  - CI 실패 시 build는 'failure'가 아니라 'skipped'가 되므로
+    #    `result != 'failure'` 로 쓰면 테스트가 깨져도 배포가 나가버린다.
+    #  - 선행 job이 skipped일 때 이 job이 평가되려면 상태 함수(!cancelled())가 필요하다.
+    if: ${{ !cancelled() && (needs.build.result == 'success' || inputs.image_tag != '') }}
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      APP_DIR: ${{ vars.APP_DIR || '/opt/stockops' }}
+      SSH_PORT: ${{ vars.SSH_PORT || '22' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image
+        id: img
+        run: |
+          base="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            echo "image=${base}:${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=${{ needs.build.outputs.image }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_KEY }}"         > ~/.ssh/id_deploy
+          # known_hosts를 미리 고정한다. ssh-keyscan으로 즉석에서 받으면
+          # 중간자 공격을 검증 없이 신뢰하게 된다.
+          printf '%s\n' "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_deploy
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Upload compose & deploy script
+        run: |
+          SSH_TARGET="${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}"
+          # db 최초 생성 시에만 쓰이지만 compose가 bind mount 하므로 경로가 존재해야 한다.
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" "$SSH_TARGET" "mkdir -p '$APP_DIR/docker/initdb'"
+          scp -i ~/.ssh/id_deploy -P "$SSH_PORT" \
+            docker-compose.prod.yml scripts/deploy.sh \
+            "$SSH_TARGET:$APP_DIR/"
+          scp -i ~/.ssh/id_deploy -P "$SSH_PORT" \
+            docker/initdb/. \
+            "$SSH_TARGET:$APP_DIR/docker/initdb/"
+
+      - name: Login to GHCR on server
+        run: |
+          # 토큰을 인자로 넘기면 서버의 ps 목록에 잠깐 노출된다. stdin으로 파이프.
+          printf '%s' "${{ secrets.GITHUB_TOKEN }}" \
+            | ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" \
+                "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+                "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
+
+      - name: Deploy
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "chmod +x '$APP_DIR/deploy.sh' && APP_DIR='$APP_DIR' '$APP_DIR/deploy.sh' '${{ steps.img.outputs.image }}'"
+
+      - name: Verify from outside
+        # 서버 내부 헬스체크는 deploy.sh가 이미 했다. 여기서는 리버스 프록시·TLS까지
+        # 포함한 실제 외부 경로가 살아있는지 확인한다.
+        run: curl -fsS -m 10 https://api.stockops.site/health
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### 배포 결과"
+            echo ""
+            echo "- 이미지: \`${{ steps.img.outputs.image }}\`"
+            echo "- 커밋: ${{ github.sha }}"
+            echo "- 롤백: Actions → CD → Run workflow → image_tag 입력"
+          } >> "$GITHUB_STEP_SUMMARY"
