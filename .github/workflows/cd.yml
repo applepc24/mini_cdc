@@ -8,6 +8,14 @@ name: CD
 on:
   push:
     branches: [main]
+    # 문서만 바뀐 커밋으로 운영 재배포가 도는 것을 막는다.
+    # 파일은 정상적으로 GitHub에 올라간다(README 반영 등). 배포만 건너뛴다.
+    # 문서와 코드를 함께 바꾼 커밋은 정상 배포된다
+    # (paths-ignore 는 "무시 목록에만 해당하는 변경"일 때만 건너뛴다).
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".gitignore"
   workflow_dispatch:
     inputs:
       image_tag:
