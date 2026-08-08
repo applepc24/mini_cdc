@@ -17,6 +17,9 @@ COMPOSE_FILE="docker-compose.prod.yml"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/health}"
 HEALTH_RETRIES="${HEALTH_RETRIES:-30}"   # 30회 x 2초 = 최대 60초 대기
 APP_SERVICES=(api relay consumer)
+# HTTP 엔드포인트가 없는 워커. 재시작 횟수로 생사를 판단한다.
+WORKER_SERVICES=(relay consumer)
+WORKER_SETTLE_SEC="${WORKER_SETTLE_SEC:-10}"
 
 NEW_IMAGE="${1:-}"
 if [ -z "$NEW_IMAGE" ]; then
@@ -64,6 +67,32 @@ for i in $(seq 1 "$HEALTH_RETRIES"); do
   fi
   sleep 2
 done
+
+# ── 5b. 워커(relay/consumer)가 크래시 루프가 아닌지 ──────────
+# api 의 /health 만 보면 워커가 죽어도 배포가 "성공"으로 끝난다.
+# 실제로 kafka-python 무고정 의존성 때문에 relay 만 ImportError 로
+# 재시작을 반복하는데 배포는 초록불이었던 사고가 있었다.
+# 방금 recreate 했으므로 RestartCount 는 0에서 시작한다. 0이 아니면 재기동 중.
+if [ "$healthy" = "1" ]; then
+  echo "[deploy] worker check (${WORKER_SETTLE_SEC}초 관찰): ${WORKER_SERVICES[*]}"
+  sleep "$WORKER_SETTLE_SEC"
+  for svc in "${WORKER_SERVICES[@]}"; do
+    cid="$(compose ps -q "$svc" 2>/dev/null || true)"
+    if [ -z "$cid" ]; then
+      echo "[deploy] ❌ ${svc}: 컨테이너를 찾을 수 없음" >&2
+      healthy=0
+      continue
+    fi
+    status="$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || echo unknown)"
+    restarts="$(docker inspect -f '{{.RestartCount}}' "$cid" 2>/dev/null || echo -1)"
+    echo "[deploy]   ${svc}: status=${status} restarts=${restarts}"
+    if [ "$status" != "running" ] || [ "$restarts" != "0" ]; then
+      echo "[deploy] ❌ ${svc} 비정상 (크래시 루프 의심)" >&2
+      compose logs --tail 30 "$svc" >&2 || true
+      healthy=0
+    fi
+  done
+fi
 
 # ── 6. 실패하면 되돌린다 ────────────────────────────────────
 if [ "$healthy" != "1" ]; then

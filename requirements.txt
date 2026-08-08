@@ -11,7 +11,13 @@ PyJWT
 email-validator
 openai>=1.0.0
 python-multipart
-kafka-python @ git+https://github.com/dpkp/kafka-python.git
+# ⚠️ 버전 고정 필수.
+# 이전에는 `kafka-python @ git+https://github.com/dpkp/kafka-python.git` 였고,
+# 빌드 시점마다 master 최신을 받아 재현 불가능한 이미지가 만들어졌다.
+# 실제로 CI 최초 빌드에서 2.3.0 → 3.1.0.dev 로 넘어가며 relay 가 죽었다:
+#   ImportError: cannot import name 'NoBrokersAvailable' from 'kafka.errors'
+# (3.x 에서 예외 클래스가 재편됨). 운영에서 정상 동작하던 버전으로 고정한다.
+kafka-python==2.3.0
 langchain>=0.2.0
 langchain-openai>=0.1.0
 openai>=1.0.0
